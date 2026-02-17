@@ -1,0 +1,339 @@
+﻿@page "/student/classoffering/{Id:int}/grades"
+@rendermode InteractiveServer
+
+@using System.Security.Claims
+@using GradeProgressMonitoring.Data
+@using GradeProgressMonitoring.Models
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+
+@attribute [Authorize(Roles = "Student")]
+
+@inject ApplicationDbContext Db
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+
+<h3>My Grades</h3>
+
+@if (loading)
+{
+    <p>Loading...</p>
+}
+else if (offering is null)
+{
+    <p class="text-danger">Class offering not found.</p>
+}
+else if (!isEnrolled)
+{
+    <p class="text-danger">You are not enrolled in this class offering.</p>
+}
+else
+{
+    <div style="margin-bottom:12px;">
+        <p style="margin:0;"><b>@offering.SubjectCode</b> — @offering.SubjectTitle</p>
+        <p style="margin:0;">
+            @displaySection • @offering.Term / @offering.SchoolYear • <b>@offering.ClassType</b>
+        </p>
+    </div>
+
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
+        <button class="btn btn-outline-secondary" type="button" @onclick="Back">Back</button>
+
+        <label style="display:flex; gap:8px; align-items:center; margin:0;">
+            <input type="checkbox" @bind="whatIfEnabled" @bind:after="RecomputeTotals" />
+            Enable What-If
+        </label>
+
+        <button class="btn btn-sm btn-outline-danger"
+                type="button"
+                @onclick="ResetWhatIf"
+                @attributes="ResetWhatIfButtonAttributes">
+            Reset What-If
+        </button>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1fr 320px; gap:16px; align-items:start;">
+        <div>
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Component</th>
+                        <th>Item</th>
+                        <th style="width:130px;">Score</th>
+                        <th style="width:130px;">Out of</th>
+                        <th style="width:180px;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in rows)
+                    {
+                        <tr>
+                            <td>@r.ComponentName</td>
+                            <td>@r.ItemLabel</td>
+                            <td>
+                                @if (!r.HasActualScore && whatIfEnabled)
+                                {
+                                    <InputNumber TValue="decimal?"
+                                                 class="form-control form-control-sm"
+                                                 @bind-Value="r.WhatIfScore"
+                                                 @bind-Value:after="RecomputeTotals"
+                                                 @attributes="GetWhatIfInputAttributes(r)" />
+                                    <small class="text-muted">What-If</small>
+                                }
+                                else
+                                {
+                                    <span>@(r.ActualScore?.ToString() ?? "—")</span>
+                                }
+                            </td>
+                            <td>@r.MaxScore</td>
+                            <td>
+                                @if (r.HasActualScore)
+                                {
+                                    <span class="text-success">Graded</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">Not graded yet</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (rows.Count == 0)
+            {
+                <p class="text-muted">No graded items found yet.</p>
+            }
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <h5 style="margin-top:0;">Summary</h5>
+
+                <div style="display:flex; justify-content:space-between;">
+                    <span>Total earned</span>
+                    <b>@earned.ToString("0.##")</b>
+                </div>
+
+                <div style="display:flex; justify-content:space-between;">
+                    <span>Total possible</span>
+                    <b>@possible.ToString("0.##")</b>
+                </div>
+
+                <hr />
+
+                <div style="display:flex; justify-content:space-between;">
+                    <span>Total percentage</span>
+                    <b>@totalPercent.ToString("0.##")%</b>
+                </div>
+
+                <div style="display:flex; justify-content:space-between;">
+                    <span>Grade equivalent</span>
+                    <b>@gradeEquivalent</b>
+                </div>
+
+                @if (whatIfEnabled)
+                {
+                    <div style="margin-top:10px;">
+                        <span class="badge bg-info text-dark">What-If active</span>
+                        <p class="text-muted" style="margin:8px 0 0 0;">
+                            What-If scores are not saved. They only simulate your grade.
+                        </p>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool loading = true;
+    private bool isEnrolled = false;
+    private bool whatIfEnabled = false;
+
+    private ClassOffering? offering;
+    private Enrollment? myEnrollment;
+    private string displaySection = "TBD";
+
+    private decimal earned = 0m;
+    private decimal possible = 0m;
+    private decimal totalPercent = 0m;
+    private string gradeEquivalent = "—";
+
+    private readonly List<GradeRow> rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        RecomputeTotals();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        offering = await Db.ClassOfferings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ClassOfferingId == Id);
+
+        if (offering is null)
+        {
+            loading = false;
+            return;
+        }
+
+        myEnrollment = await Db.Enrollments
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.ClassOfferingId == Id && e.StudentUserId == userId);
+
+        isEnrolled = myEnrollment is not null;
+
+        if (!isEnrolled)
+        {
+            loading = false;
+            return;
+        }
+
+        displaySection = string.IsNullOrWhiteSpace(myEnrollment?.Section)
+            ? offering.CourseYearSection
+            : myEnrollment!.Section!;
+
+        var components = await Db.GradingComponents
+            .AsNoTracking()
+            .Where(c => c.ClassOfferingId == Id && c.IsEnabled)
+            .OrderBy(c => c.ComponentType)
+            .ToListAsync();
+
+        var compIds = components.Select(c => c.GradingComponentId).ToList();
+
+        var items = await Db.ComponentItems
+            .AsNoTracking()
+            .Where(i => compIds.Contains(i.GradingComponentId))
+            .OrderBy(i => i.GradingComponentId)
+            .ThenBy(i => i.OrderNo)
+            .ToListAsync();
+
+        var itemIds = items.Select(i => i.ComponentItemId).ToList();
+
+        var scores = await Db.ScoreEntries
+            .AsNoTracking()
+            .Where(s => s.StudentUserId == userId && itemIds.Contains(s.ComponentItemId))
+            .ToListAsync();
+
+        rows.Clear();
+
+        foreach (var item in items)
+        {
+            var comp = components.First(c => c.GradingComponentId == item.GradingComponentId);
+            var entry = scores.FirstOrDefault(s => s.ComponentItemId == item.ComponentItemId);
+
+            rows.Add(new GradeRow
+            {
+                ComponentName = comp.ComponentType.ToString(),
+                ItemLabel = item.Label,
+                MaxScore = item.MaxScore,
+                ActualScore = entry?.Score,
+                WhatIfScore = null
+            });
+        }
+
+        loading = false;
+    }
+
+    private void RecomputeTotals()
+    {
+        decimal e = 0m;
+        decimal p = 0m;
+
+        foreach (var r in rows)
+        {
+            p += r.MaxScore;
+
+            if (r.ActualScore.HasValue)
+            {
+                e += Clamp(r.ActualScore.Value, 0, r.MaxScore);
+            }
+            else if (whatIfEnabled && r.WhatIfScore.HasValue)
+            {
+                e += Clamp(r.WhatIfScore.Value, 0, r.MaxScore);
+            }
+        }
+
+        earned = e;
+        possible = p;
+        totalPercent = (possible <= 0) ? 0 : (earned / possible) * 100m;
+
+        gradeEquivalent = ToGradeEquivalent(totalPercent);
+        StateHasChanged();
+    }
+
+    private static decimal Clamp(decimal v, decimal min, decimal max)
+        => (v < min) ? min : (v > max) ? max : v;
+
+    private static string ToGradeEquivalent(decimal percent)
+    {
+        if (percent >= 96) return "1.00";
+        if (percent >= 93) return "1.25";
+        if (percent >= 90) return "1.50";
+        if (percent >= 87) return "1.75";
+        if (percent >= 84) return "2.00";
+        if (percent >= 81) return "2.25";
+        if (percent >= 78) return "2.50";
+        if (percent >= 75) return "3.00";
+        return "5.00";
+    }
+
+    private void ResetWhatIf()
+    {
+        foreach (var r in rows) r.WhatIfScore = null;
+        RecomputeTotals();
+    }
+
+    private void Back() => Nav.NavigateTo("/student/subjects");
+
+    private Dictionary<string, object> ResetWhatIfButtonAttributes
+    {
+        get
+        {
+            var attrs = new Dictionary<string, object>();
+            if (!whatIfEnabled)
+                attrs["disabled"] = "disabled";
+            return attrs;
+        }
+    }
+
+    private Dictionary<string, object> GetWhatIfInputAttributes(GradeRow r)
+    {
+        var attrs = new Dictionary<string, object>();
+
+        if (!whatIfEnabled || r.HasActualScore)
+        {
+            attrs["disabled"] = "disabled";
+            return attrs;
+        }
+
+        attrs["min"] = "0";
+        attrs["max"] = r.MaxScore.ToString("0.##");
+
+        return attrs;
+    }
+
+    private sealed class GradeRow
+    {
+        public string ComponentName { get; set; } = "";
+        public string ItemLabel { get; set; } = "";
+        public decimal MaxScore { get; set; }
+        public decimal? ActualScore { get; set; }
+        public decimal? WhatIfScore { get; set; }
+        public bool HasActualScore => ActualScore.HasValue;
+    }
+}

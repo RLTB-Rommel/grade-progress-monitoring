@@ -1,0 +1,156 @@
+﻿@page "/scorer/classofferings"
+@rendermode InteractiveServer
+
+@using GradeProgressMonitoring.Models
+@using GradeProgressMonitoring.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+
+@attribute [Authorize(Roles = "Scorer")]
+
+@inject ApplicationDbContext Db
+@inject NavigationManager Nav
+
+<h3>Scorer Dashboard</h3>
+<p class="text-muted">Select a class offering to encode scores.</p>
+
+<EditForm Model="filter" FormName="filterForm" OnValidSubmit="LoadAsync">
+    <DataAnnotationsValidator />
+
+    <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin: 10px 0 16px;">
+        <div>
+            <label><b>Term</b></label>
+            <InputText class="form-control" style="min-width:220px;" @bind-Value="filter.Term" />
+        </div>
+
+        <div>
+            <label><b>School Year</b></label>
+            <InputText class="form-control" style="min-width:220px;" @bind-Value="filter.SchoolYear" />
+        </div>
+
+        <button class="btn btn-outline-secondary" type="submit" @attributes="RefreshButtonAttributes">
+            @(loading ? "Loading..." : "Refresh")
+        </button>
+    </div>
+</EditForm>
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="@messageCss" style="margin-bottom:10px;">@message</div>
+}
+
+@if (loading)
+{
+    <p>Loading...</p>
+}
+else if (offerings.Count == 0)
+{
+    <div class="text-muted">
+        No class offerings available for <b>@filter.Term</b> / <b>@filter.SchoolYear</b>.
+    </div>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Subject</th>
+                <th style="width:120px;">Type</th>
+                <th style="width:170px;">Term / SY</th>
+                <th style="width:170px;">Section</th>
+                <th style="width:110px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var o in offerings)
+            {
+                <tr>
+                    <td>
+                        <div style="font-weight:700;">@o.SubjectCode</div>
+                        <div>@o.SubjectTitle</div>
+                    </td>
+                    <td>@o.ClassType</td>
+                    <td>@o.Term / @o.SchoolYear</td>
+                    <td>@o.CourseYearSection</td>
+                    <td class="text-end">
+                        <button type="button" class="btn btn-primary btn-sm"
+                                @onclick="() => Encode(o.ClassOfferingId)">
+                            Encode
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool loading = true;
+
+    private string? message;
+    private string messageCss = "text-muted";
+
+    private List<ClassOffering> offerings = new();
+
+    private FilterModel filter = new()
+    {
+        Term = "2nd Semester",
+        SchoolYear = "2025-2026"
+    };
+
+    protected override async Task OnInitializedAsync()
+        => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        message = null;
+
+        try
+        {
+            var term = (filter.Term ?? "").Trim();
+            var sy = (filter.SchoolYear ?? "").Trim();
+
+            // ✅ SAME SOURCE as Admin: Db.ClassOfferings filtered by term + SY
+            // ✅ PLUS: hide placeholder offerings ("TBD") from scorer
+            offerings = await Db.ClassOfferings
+                .AsNoTracking()
+                .Where(c => c.Term == term
+                         && c.SchoolYear == sy
+                         && !string.IsNullOrWhiteSpace(c.CourseYearSection)   // removes "TBD" rows
+                         && c.CourseYearSection != "TBD")                     // extra safety if stored as literal
+                .OrderBy(c => c.SubjectCode)
+                .ThenBy(c => c.ClassType)
+                .ThenBy(c => c.CourseYearSection)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            messageCss = "text-danger";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private void Encode(int classOfferingId)
+        => Nav.NavigateTo($"/scorer/classoffering/{classOfferingId}/encode");
+
+    private Dictionary<string, object> RefreshButtonAttributes
+    {
+        get
+        {
+            var attrs = new Dictionary<string, object>();
+            if (loading) attrs["disabled"] = "disabled";
+            return attrs;
+        }
+    }
+
+    private sealed class FilterModel
+    {
+        public string? Term { get; set; }
+        public string? SchoolYear { get; set; }
+    }
+}

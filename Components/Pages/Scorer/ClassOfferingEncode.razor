@@ -1,0 +1,532 @@
+@page "/scorer/classoffering/{Id:int}/encode"
+@rendermode InteractiveServer
+
+@using GradeProgressMonitoring.Models
+@using GradeProgressMonitoring.Data
+@using GradeProgressMonitoring.Services
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Authorization
+
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Scorer")]
+
+@inject ApplicationDbContext Db
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+
+<h3>Scorer Encoding</h3>
+
+@if (loading)
+{
+    <p>Loading...</p>
+}
+else if (offering is null)
+{
+    <p class="text-danger">Class offering not found.</p>
+}
+else
+{
+    <div style="margin-bottom:12px;">
+        <p style="margin:0;"><b>@offering.SubjectCode</b> — @offering.SubjectTitle</p>
+        <p style="margin:0;">@offering.CourseYearSection • @offering.Term / @offering.SchoolYear • <b>@offering.ClassType</b></p>
+
+        <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-outline-secondary" @onclick="BackToList">Back</button>
+
+            @if (isAdmin)
+            {
+                <button type="button" class="btn btn-success" @onclick="GoConfigure">Configure</button>
+                <button type="button" class="btn btn-primary" @onclick="GoRoster">Roster</button>
+            }
+        </div>
+    </div>
+
+    <hr />
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; max-width: 900px;">
+        <div>
+            <label><b>Component</b></label>
+            <InputSelect class="form-control"
+                         TValue="int"
+                         @bind-Value="selectedComponentId"
+                         @bind-Value:after="OnComponentChanged">
+                <option value="0">-- select --</option>
+                @foreach (var c in components)
+                {
+                    <option value="@c.GradingComponentId">@GetCompName(c)</option>
+                }
+            </InputSelect>
+        </div>
+
+        <div>
+            <label><b>Item</b></label>
+            <InputSelect class="form-control"
+                         TValue="int"
+                         @bind-Value="selectedItemId"
+                         @bind-Value:after="OnItemChanged"
+                         disabled="@IsItemSelectDisabled">
+                <option value="0">-- select --</option>
+                @foreach (var i in itemsForSelectedComponent)
+                {
+                    <option value="@i.ComponentItemId">@i.Label</option>
+                }
+            </InputSelect>
+        </div>
+    </div>
+
+    @if (selectedItem is not null)
+    {
+        <div style="margin-top:10px;">
+            <p style="margin:0;">
+                <b>Encoding status:</b>
+                @if (isAdmin)
+                {
+                    <span class="text-success">Admin override (editable)</span>
+                }
+                else if (selectedItem.IsApproved)
+                {
+                    <span class="text-success">Approved (final)</span>
+                }
+                else if (selectedItem.IsLocked)
+                {
+                    <span class="text-danger">Locked</span>
+                }
+                else if (selectedItem.IsOpenForEncoding)
+                {
+                    <span class="text-success">Editable</span>
+                }
+                else
+                {
+                    <span class="text-danger">Closed for scorer</span>
+                }
+            </p>
+
+            @if (isAdmin)
+            {
+                <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <label style="display:flex; gap:8px; align-items:center; margin:0;">
+                        <input type="checkbox" @bind="openFlag" />
+                        Open for scorer encoding
+                    </label>
+
+                    <button type="button"
+                            class="btn btn-sm btn-outline-primary"
+                            @onclick="SaveOpenFlagAsync"
+                            disabled="@savingOpenFlag">
+                        @(savingOpenFlag ? "Saving..." : "Save Open/Close")
+                    </button>
+
+                    @if (!string.IsNullOrWhiteSpace(openFlagMsg))
+                    {
+                        <span class="@openFlagCss">@openFlagMsg</span>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    <hr />
+
+    <h5>Encode Scores</h5>
+
+    @if (selectedItem is null)
+    {
+        <p>Please select a component and item.</p>
+    }
+    else if (enrollments.Count == 0)
+    {
+        <p>No students enrolled yet.</p>
+    }
+    else
+    {
+        <EditForm Model="grid" OnValidSubmit="SaveScoresAsync">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th style="width:160px;">Student No</th>
+                        <th>Name</th>
+                        <th style="width:220px;">Score (0..@selectedItem.MaxScore)</th>
+                        <th style="width:220px;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in grid.Rows)
+                    {
+                        <tr>
+                            <td>@row.StudentNo</td>
+                            <td>@row.StudentName</td>
+                            <td>
+                                <InputNumber TValue="decimal?"
+                                             class="form-control"
+                                             @bind-Value="row.Score"
+                                             @attributes="GetScoreInputAttributes(row)" />
+                            </td>
+                            <td>
+                                @if (string.IsNullOrWhiteSpace(row.StudentUserId))
+                                {
+                                    <span class="text-muted">Not linked (Claim Enrollment first)</span>
+                                }
+                                else
+                                {
+                                    <span class="text-success">OK</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <button class="btn btn-primary"
+                        type="submit"
+                        @attributes="SaveButtonAttributes">
+                    @(saving ? "Saving..." : "Save Scores")
+                </button>
+
+                <small class="text-muted">
+                    Tip: Leave blank to keep “no score yet”. Blank + Save will clear an existing saved score.
+                </small>
+
+                @if (!string.IsNullOrWhiteSpace(message))
+                {
+                    <span class="@messageCss">@message</span>
+                }
+            </div>
+        </EditForm>
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool loading = true;
+    private bool saving = false;
+
+    private bool isAdmin = false;
+    private bool canEditSelectedItem = false;
+
+    private ClassOffering? offering;
+
+    private List<GradingComponent> components = new();
+    private List<ComponentItem> itemsForSelectedComponent = new();
+    private List<Enrollment> enrollments = new();
+
+    private int selectedComponentId = 0;
+    private int selectedItemId = 0;
+
+    private GradingComponent? selectedComponent;
+    private ComponentItem? selectedItem;
+
+    // Open/Close toggle (admin)
+    private bool openFlag = false;
+    private bool savingOpenFlag = false;
+    private string? openFlagMsg;
+    private string openFlagCss = "text-muted";
+
+    private string? message;
+    private string messageCss = "text-muted";
+
+    private ScoreGridModel grid = new();
+
+    private bool IsItemSelectDisabled => selectedComponent is null || itemsForSelectedComponent.Count == 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await DetectRolesAsync();
+        await LoadAsync();
+    }
+
+    private async Task DetectRolesAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        isAdmin = user.IsInRole("Admin");
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+
+        offering = await Db.ClassOfferings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ClassOfferingId == Id);
+
+        components = await Db.GradingComponents
+            .AsNoTracking()
+            .Where(x => x.ClassOfferingId == Id && x.IsEnabled)
+            .OrderBy(x => x.ComponentType)
+            .ToListAsync();
+
+        enrollments = await Db.Enrollments
+            .AsNoTracking()
+            .Where(x => x.ClassOfferingId == Id)
+            .OrderBy(x => x.StudentNo)
+            .ThenBy(x => x.StudentName)
+            .ToListAsync();
+
+        loading = false;
+    }
+
+    private string GetCompName(GradingComponent c)
+    {
+        if (offering is null) return c.ComponentType.ToString();
+        return GradingTemplateService.GetComponentDisplayName(c.ComponentType, offering.ClassType);
+    }
+
+    private async Task OnComponentChanged()
+    {
+        selectedItemId = 0;
+        selectedItem = null;
+        canEditSelectedItem = false;
+        message = null;
+        openFlagMsg = null;
+
+        selectedComponent = components.FirstOrDefault(x => x.GradingComponentId == selectedComponentId);
+        itemsForSelectedComponent = new();
+        grid = new ScoreGridModel();
+
+        if (selectedComponent is null) return;
+
+        itemsForSelectedComponent = await Db.ComponentItems
+            .AsNoTracking()
+            .Where(i => i.GradingComponentId == selectedComponent.GradingComponentId)
+            .OrderBy(i => i.OrderNo)
+            .ToListAsync();
+    }
+
+    private async Task OnItemChanged()
+    {
+        message = null;
+        openFlagMsg = null;
+
+        selectedItem = itemsForSelectedComponent.FirstOrDefault(x => x.ComponentItemId == selectedItemId);
+
+        if (selectedItem is null)
+        {
+            canEditSelectedItem = false;
+            grid = new ScoreGridModel();
+            return;
+        }
+
+        // Admin can edit always. Scorer can edit only if open AND not locked/approved.
+        canEditSelectedItem =
+            isAdmin ||
+            (selectedItem.IsOpenForEncoding && !selectedItem.IsLocked && !selectedItem.IsApproved);
+
+        openFlag = selectedItem.IsOpenForEncoding;
+
+        await LoadExistingScoresAsync();
+    }
+
+    private async Task SaveOpenFlagAsync()
+    {
+        if (!isAdmin) return;
+        if (selectedItem is null) return;
+
+        savingOpenFlag = true;
+        openFlagMsg = null;
+
+        try
+        {
+            var entity = await Db.ComponentItems
+                .FirstOrDefaultAsync(i => i.ComponentItemId == selectedItem.ComponentItemId);
+
+            if (entity is null) return;
+
+            entity.IsOpenForEncoding = openFlag;
+            await Db.SaveChangesAsync();
+
+            selectedItem.IsOpenForEncoding = openFlag;
+
+            canEditSelectedItem =
+                isAdmin ||
+                (selectedItem.IsOpenForEncoding && !selectedItem.IsLocked && !selectedItem.IsApproved);
+
+            openFlagMsg = "Updated.";
+            openFlagCss = "text-success";
+        }
+        catch (Exception ex)
+        {
+            openFlagMsg = ex.Message;
+            openFlagCss = "text-danger";
+        }
+        finally
+        {
+            savingOpenFlag = false;
+        }
+    }
+
+    private async Task LoadExistingScoresAsync()
+    {
+        if (selectedItem is null) return;
+
+        var existing = await Db.ScoreEntries
+            .AsNoTracking()
+            .Where(s => s.ComponentItemId == selectedItem.ComponentItemId)
+            .ToListAsync();
+
+        var byUserId = existing
+            .Where(x => !string.IsNullOrWhiteSpace(x.StudentUserId))
+            .GroupBy(x => x.StudentUserId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var rows = new List<ScoreRow>();
+
+        foreach (var e in enrollments)
+        {
+            var studentUserId = (e.StudentUserId ?? "").Trim();
+            decimal? score = null;
+
+            if (!string.IsNullOrWhiteSpace(studentUserId) &&
+                byUserId.TryGetValue(studentUserId, out var entry))
+            {
+                score = entry.Score;
+            }
+
+            rows.Add(new ScoreRow
+            {
+                StudentUserId = studentUserId,
+                StudentNo = e.StudentNo ?? "",
+                StudentName = e.StudentName ?? "",
+                Score = score
+            });
+        }
+
+        grid = new ScoreGridModel { Rows = rows };
+    }
+
+    private async Task SaveScoresAsync()
+    {
+        if (selectedItem is null) return;
+        if (!canEditSelectedItem) return;
+
+        saving = true;
+        message = null;
+
+        try
+        {
+            // Load ALL existing entries once (avoid N+1 queries)
+            var existing = await Db.ScoreEntries
+                .Where(s => s.ComponentItemId == selectedItem.ComponentItemId)
+                .ToListAsync();
+
+            var byUserId = existing
+                .Where(x => !string.IsNullOrWhiteSpace(x.StudentUserId))
+                .ToDictionary(x => x.StudentUserId, x => x);
+
+            var changes = 0;
+
+            foreach (var row in grid.Rows)
+            {
+                if (string.IsNullOrWhiteSpace(row.StudentUserId))
+                    continue;
+
+                // Validate range if value is present
+                if (row.Score.HasValue)
+                {
+                    if (row.Score.Value < 0 || row.Score.Value > selectedItem.MaxScore)
+                        throw new InvalidOperationException(
+                            $"Score for {row.StudentNo} must be between 0 and {selectedItem.MaxScore}.");
+                }
+
+                // If score is blank/null, interpret as "clear score"
+                if (!row.Score.HasValue)
+                {
+                    if (byUserId.TryGetValue(row.StudentUserId, out var existingEntry))
+                    {
+                        Db.ScoreEntries.Remove(existingEntry);
+                        changes++;
+                    }
+                    continue;
+                }
+
+                if (!byUserId.TryGetValue(row.StudentUserId, out var entry))
+                {
+                    Db.ScoreEntries.Add(new ScoreEntry
+                    {
+                        ComponentItemId = selectedItem.ComponentItemId,
+                        StudentUserId = row.StudentUserId,
+                        Score = row.Score,
+                        EncodedAt = DateTime.Now,
+                        UpdatedAt = DateTime.Now
+                    });
+                    changes++;
+                }
+                else
+                {
+                    if (entry.Score != row.Score)
+                    {
+                        entry.Score = row.Score;
+                        entry.UpdatedAt = DateTime.Now;
+                        changes++;
+                    }
+                }
+            }
+
+            if (changes == 0)
+            {
+                message = "No changes to save.";
+                messageCss = "text-muted";
+                return;
+            }
+
+            await Db.SaveChangesAsync();
+
+            message = $"Saved {changes} change(s).";
+            messageCss = "text-success";
+
+            await LoadExistingScoresAsync();
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            messageCss = "text-danger";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private Dictionary<string, object> SaveButtonAttributes
+    {
+        get
+        {
+            var attrs = new Dictionary<string, object>();
+            if (!canEditSelectedItem || saving)
+                attrs["disabled"] = "disabled";
+            return attrs;
+        }
+    }
+
+    private Dictionary<string, object> GetScoreInputAttributes(ScoreRow row)
+    {
+        var attrs = new Dictionary<string, object>();
+
+        // Disable if not editable, or if student not linked
+        if (!canEditSelectedItem || string.IsNullOrWhiteSpace(row.StudentUserId))
+            attrs["disabled"] = "disabled";
+
+        return attrs;
+    }
+
+    // ✅ Scorer-friendly navigation
+    private void BackToList() => Nav.NavigateTo("/scorer/classofferings");
+
+    // Admin-only pages (buttons already hidden for non-admin)
+    private void GoConfigure() => Nav.NavigateTo($"/admin/classoffering/{Id}/configure");
+    private void GoRoster() => Nav.NavigateTo($"/admin/classoffering/{Id}/roster");
+
+    private class ScoreGridModel
+    {
+        public List<ScoreRow> Rows { get; set; } = new();
+    }
+
+    private class ScoreRow
+    {
+        public string StudentUserId { get; set; } = "";
+        public string StudentNo { get; set; } = "";
+        public string StudentName { get; set; } = "";
+        public decimal? Score { get; set; }
+    }
+}

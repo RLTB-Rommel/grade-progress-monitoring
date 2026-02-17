@@ -1,0 +1,246 @@
+﻿@page "/admin/classoffering/{Id:int}/configure"
+@rendermode InteractiveServer
+
+@using GradeProgressMonitoring.Models
+@using GradeProgressMonitoring.Services
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+
+@inject GradeProgressMonitoring.Data.ApplicationDbContext Db
+@inject GradingTemplateService TemplateService
+@inject NavigationManager Nav
+
+<h3>Configure Grading Components</h3>
+
+@if (loading)
+{
+    <p>Loading...</p>
+}
+else if (offering is null)
+{
+    <p class="text-danger">Class offering not found.</p>
+}
+else
+{
+    <div style="margin-bottom:12px;">
+        <p style="margin:0;"><b>@offering.SubjectCode</b> — @offering.SubjectTitle</p>
+        <p style="margin:0;">
+            @offering.CourseYearSection • @offering.Term / @offering.SchoolYear • <b>@offering.ClassType</b>
+        </p>
+
+        <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn btn-outline-secondary" type="button" @onclick="BackToList">Back to List</button>
+            <button class="btn btn-outline-primary" type="button" @onclick="GoRoster">Roster</button>
+        </div>
+    </div>
+
+    <hr />
+
+    <EditForm EditContext="@editContext" OnSubmit="SaveAsync" FormName="grading-config-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <p class="text-muted" style="max-width:900px;">
+            Enable the components you want, then set weights that total <b>100</b>.
+            Saving will also auto-generate default items (Weeks, Quizzes, Exams/Practicals, etc.).
+        </p>
+
+        <table class="table" style="max-width:900px;">
+            <thead>
+                <tr>
+                    <th style="width:120px;">Enabled</th>
+                    <th>Component</th>
+                    <th style="width:220px;">Weight (%)</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in vm.Rows)
+                {
+                    <tr @key="row.ComponentType">
+                        <td>
+                            <InputCheckbox @bind-Value="row.IsEnabled" />
+                        </td>
+                        <td>
+                            @GradingTemplateService.GetComponentDisplayName(row.ComponentType, offering.ClassType)
+                        </td>
+                        <td>
+                            <InputNumber class="form-control"
+                                         @bind-Value="row.WeightPercent"
+                                         disabled="@(!row.IsEnabled)" />
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-success" type="submit" disabled="@saving">
+                @(saving ? "Saving..." : "Save Configuration")
+            </button>
+
+            <label style="display:flex; gap:8px; align-items:center;">
+                <InputCheckbox @bind-Value="vm.OpenAllItemsForEncoding" />
+                <span>Open all generated items for encoding</span>
+            </label>
+
+            @if (!string.IsNullOrWhiteSpace(message))
+            {
+                <span class="@messageCss">@message</span>
+            }
+        </div>
+    </EditForm>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool loading = true;
+    private bool saving = false;
+
+    private ClassOffering? offering;
+
+    private string? message;
+    private string messageCss = "text-muted";
+
+    private ConfigureVm vm = new();
+    private EditContext? editContext;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        message = null;
+
+        offering = await Db.ClassOfferings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ClassOfferingId == Id);
+
+        // Default rows (all component types)
+        vm = new ConfigureVm
+        {
+            OpenAllItemsForEncoding = true,
+            Rows = Enum.GetValues<ComponentType>()
+                .Select(t => new RowVm { ComponentType = t, IsEnabled = true, WeightPercent = 0m })
+                .ToList()
+        };
+
+        // If existing config exists, load it
+        if (offering is not null)
+        {
+            var existing = await Db.GradingComponents
+                .AsNoTracking()
+                .Where(x => x.ClassOfferingId == Id)
+                .ToListAsync();
+
+            foreach (var row in vm.Rows)
+            {
+                var match = existing.FirstOrDefault(e => e.ComponentType == row.ComponentType);
+                if (match is not null)
+                {
+                    row.IsEnabled = match.IsEnabled;
+                    row.WeightPercent = match.WeightPercent;
+                }
+            }
+
+            if (!existing.Any())
+                ApplyDefaultWeights(offering.ClassType);
+        }
+
+        // IMPORTANT: create EditContext AFTER vm is finalized
+        editContext = new EditContext(vm);
+
+        loading = false;
+    }
+
+    private void ApplyDefaultWeights(ClassType classType)
+    {
+        if (classType == ClassType.Lecture)
+        {
+            Set(ComponentType.Attendance, true, 10);
+            Set(ComponentType.Activity, true, 20);
+            Set(ComponentType.Recitation, true, 10);
+            Set(ComponentType.Quizzes, true, 20);
+            Set(ComponentType.MajorOrPractical, true, 30);
+            Set(ComponentType.ReportingOrProject, true, 10);
+        }
+        else
+        {
+            Set(ComponentType.Attendance, true, 10);
+            Set(ComponentType.Activity, true, 40);
+            Set(ComponentType.Quizzes, true, 10);
+            Set(ComponentType.MajorOrPractical, true, 30);
+            Set(ComponentType.ReportingOrProject, true, 10);
+            Set(ComponentType.Recitation, false, 0);
+        }
+
+        void Set(ComponentType t, bool on, decimal w)
+        {
+            var r = vm.Rows.First(x => x.ComponentType == t);
+            r.IsEnabled = on;
+            r.WeightPercent = w;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (offering is null || editContext is null) return;
+
+        message = null;
+
+        // Validate the form (catches InputNumber parsing issues)
+        if (!editContext.Validate())
+        {
+            message = "Please fix invalid inputs (check Weight fields).";
+            messageCss = "text-danger";
+            return;
+        }
+
+        saving = true;
+
+        try
+        {
+            var configs = vm.Rows.Select(r => new GradingTemplateService.ComponentConfig(
+                r.ComponentType, r.IsEnabled, r.WeightPercent)).ToList();
+
+            await TemplateService.ApplyTemplateAsync(
+                classOfferingId: Id,
+                configs: configs,
+                openAllItemsForEncoding: vm.OpenAllItemsForEncoding);
+
+            // After successful generation, go to the page that lists generated items
+            Nav.NavigateTo($"/admin/classoffering/{Id}/items");
+            return;
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            messageCss = "text-danger";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void BackToList() => Nav.NavigateTo("/admin/classoffering");
+    private void GoRoster() => Nav.NavigateTo($"/admin/classoffering/{Id}/roster");
+
+    private sealed class ConfigureVm
+    {
+        public bool OpenAllItemsForEncoding { get; set; } = true;
+        public List<RowVm> Rows { get; set; } = new();
+    }
+
+    private sealed class RowVm
+    {
+        public ComponentType ComponentType { get; set; }
+        public bool IsEnabled { get; set; } = true;
+        public decimal WeightPercent { get; set; } = 0m;
+    }
+}

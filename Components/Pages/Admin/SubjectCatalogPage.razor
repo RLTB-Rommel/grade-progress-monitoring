@@ -1,0 +1,260 @@
+﻿@page "/admin/subjects"
+@rendermode InteractiveServer
+
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@using System.ComponentModel.DataAnnotations
+
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+
+@inject GradeProgressMonitoring.Data.ApplicationDbContext Db
+
+<h3>Subject Catalog</h3>
+
+<p class="text-muted">
+    Manage master subjects used for class offerings.
+</p>
+
+<hr />
+
+<h5>Add New Subject</h5>
+
+<EditForm Model="newForm" OnValidSubmit="AddAsync">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div style="display:grid; grid-template-columns: 1fr 2fr 1fr; gap:12px; max-width:1000px;">
+        <div>
+            <label><b>Subject Code</b></label>
+            <InputText class="form-control" @bind-Value="newForm.SubjectCode" />
+            <ValidationMessage For="@(() => newForm.SubjectCode)" />
+        </div>
+
+        <div>
+            <label><b>Subject Title</b></label>
+            <InputText class="form-control" @bind-Value="newForm.SubjectTitle" />
+            <ValidationMessage For="@(() => newForm.SubjectTitle)" />
+        </div>
+
+        <div>
+            <label><b>Units</b></label>
+            <InputNumber class="form-control" @bind-Value="newForm.Units" />
+        </div>
+    </div>
+
+    <div style="margin-top:10px;">
+        <button class="btn btn-primary" type="submit" disabled="@saving">
+            @(saving ? "Adding..." : "Add Subject")
+        </button>
+
+        @if (!string.IsNullOrWhiteSpace(message))
+        {
+            <span class="@messageCss" style="margin-left:10px;">@message</span>
+        }
+    </div>
+</EditForm>
+
+<hr />
+
+<h5>Subjects (@subjects.Count)</h5>
+
+@if (loading)
+{
+    <p>Loading...</p>
+}
+else if (subjects.Count == 0)
+{
+    <p>No subjects yet. Add your first subject above.</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width:160px;">Code</th>
+                <th>Title</th>
+                <th style="width:120px;">Units</th>
+                <th style="width:120px;">Active</th>
+                <th style="width:260px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var s in subjects)
+            {
+                <tr>
+                    <td>
+                        <InputText class="form-control" @bind-Value="s.SubjectCode" />
+                    </td>
+
+                    <td>
+                        <InputText class="form-control" @bind-Value="s.SubjectTitle" />
+                    </td>
+
+                    <td>
+                        <InputNumber class="form-control" @bind-Value="s.Units" />
+                    </td>
+
+                    <td style="vertical-align:middle;">
+                        <InputCheckbox @bind-Value="s.IsActive" />
+                    </td>
+
+                    <td style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="btn btn-sm btn-success"
+                                disabled="@saving"
+                                @onclick="() => SaveRowAsync(s)">
+                            Save
+                        </button>
+
+                        <button class="btn btn-sm btn-outline-danger"
+                                disabled="@saving"
+                                @onclick="() => DeleteAsync(s.SubjectCatalogId)">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool loading = true;
+    private bool saving = false;
+
+    private string? message;
+    private string messageCss = "text-muted";
+
+    private List<GradeProgressMonitoring.Models.SubjectCatalog> subjects = new();
+
+    private AddSubjectForm newForm = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+
+        subjects = await Db.SubjectCatalogs
+            .AsTracking()
+            .OrderBy(s => s.SubjectCode)
+            .ToListAsync();
+
+        loading = false;
+    }
+
+    private async Task AddAsync()
+    {
+        saving = true;
+        message = null;
+
+        try
+        {
+            var code = (newForm.SubjectCode ?? "").Trim();
+            var title = (newForm.SubjectTitle ?? "").Trim();
+
+            var exists = await Db.SubjectCatalogs.AnyAsync(s => s.SubjectCode == code);
+            if (exists)
+                throw new InvalidOperationException("Subject Code already exists.");
+
+            Db.SubjectCatalogs.Add(new GradeProgressMonitoring.Models.SubjectCatalog
+            {
+                SubjectCode = code,
+                SubjectTitle = title,
+                Units = newForm.Units,
+                IsActive = true
+            });
+
+            await Db.SaveChangesAsync();
+
+            message = "Subject added successfully.";
+            messageCss = "text-success";
+
+            newForm = new AddSubjectForm();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            messageCss = "text-danger";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task SaveRowAsync(GradeProgressMonitoring.Models.SubjectCatalog row)
+    {
+        saving = true;
+        message = null;
+
+        try
+        {
+            row.SubjectCode = (row.SubjectCode ?? "").Trim();
+            row.SubjectTitle = (row.SubjectTitle ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(row.SubjectCode))
+                throw new InvalidOperationException("Subject Code cannot be empty.");
+
+            if (string.IsNullOrWhiteSpace(row.SubjectTitle))
+                throw new InvalidOperationException("Subject Title cannot be empty.");
+
+            await Db.SaveChangesAsync();
+
+            message = "Changes saved.";
+            messageCss = "text-success";
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            messageCss = "text-danger";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        saving = true;
+        message = null;
+
+        try
+        {
+            var entity = await Db.SubjectCatalogs.FirstOrDefaultAsync(s => s.SubjectCatalogId == id);
+            if (entity is null) return;
+
+            Db.SubjectCatalogs.Remove(entity);
+            await Db.SaveChangesAsync();
+
+            message = "Subject deleted.";
+            messageCss = "text-success";
+
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            messageCss = "text-danger";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private sealed class AddSubjectForm
+    {
+        [Required(ErrorMessage = "Subject Code is required.")]
+        public string? SubjectCode { get; set; }
+
+        [Required(ErrorMessage = "Subject Title is required.")]
+        public string? SubjectTitle { get; set; }
+
+        public decimal Units { get; set; } = 0m;
+    }
+}

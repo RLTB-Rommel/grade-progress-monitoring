@@ -1,0 +1,378 @@
+﻿@page "/admin/classoffering"
+@rendermode InteractiveServer
+
+@using GradeProgressMonitoring.Models
+@using GradeProgressMonitoring.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+
+@attribute [Authorize(Roles = "Admin,Checker")]
+
+@inject ApplicationDbContext Db
+@inject NavigationManager Nav
+
+<h3>Subject Dashboards</h3>
+
+<EditForm Model="filter" FormName="filterForm" OnValidSubmit="LoadAsync">
+    <DataAnnotationsValidator />
+
+    <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin: 10px 0 16px;">
+        <div>
+            <label><b>Term</b></label>
+            <InputText class="form-control" style="min-width:220px;" @bind-Value="filter.Term" />
+        </div>
+
+        <div>
+            <label><b>School Year</b></label>
+            <InputText class="form-control" style="min-width:220px;" @bind-Value="filter.SchoolYear" />
+        </div>
+
+        <button class="btn btn-outline-secondary" type="submit" @attributes="RefreshButtonAttributes">
+            @(loading ? "Loading..." : "Refresh")
+        </button>
+    </div>
+</EditForm>
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="@messageCss" style="margin-bottom:10px;">@message</div>
+}
+
+@if (loading)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Subject</th>
+                <th style="width:90px;">Units</th>
+                <th>Offerings</th>
+                <th style="width:380px;">Create Offering</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            @foreach (var s in subjects)
+            {
+                var offeringList = offerings
+                .Where(o => o.SubjectCode == s.SubjectCode)
+                .OrderBy(o => o.ClassType)
+                .ThenBy(o => o.CourseYearSection)
+                .ToList();
+
+                if (!createInputs.ContainsKey(s.SubjectCode))
+                {
+                    createInputs[s.SubjectCode] = new CreateOfferingInput
+                    {
+                        Section = "",
+                        ClassType = ClassType.Lecture
+                    };
+                }
+                var input = createInputs[s.SubjectCode];
+
+                <tr>
+                    <td>
+                        <div style="font-weight:700;">@s.SubjectCode</div>
+                        <div>@s.SubjectTitle</div>
+                    </td>
+
+                    <td>@s.Units</td>
+
+                    <td>
+                        @if (offeringList.Count == 0)
+                        {
+                            <span class="text-muted">No offerings yet for <b>@filter.Term</b> / <b>@filter.SchoolYear</b></span>
+                        }
+                        else
+                        {
+                            <div style="display:flex; flex-direction:column; gap:10px;">
+                                @foreach (var o in offeringList)
+                                {
+                                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                                        <span>
+                                            <b>ID:</b> @o.ClassOfferingId
+                                            • <b>@o.ClassType</b>
+                                            • <b>@o.CourseYearSection</b>
+                                        </span>
+
+                                        <button type="button" class="btn btn-sm btn-success"
+                                                @onclick="() => Manage(o.ClassOfferingId)">
+                                            Manage
+                                        </button>
+
+                                        <button type="button" class="btn btn-sm btn-outline-primary"
+                                                @onclick="() => Configure(o.ClassOfferingId)">
+                                            Configure
+                                        </button>
+
+                                        <button type="button" class="btn btn-sm btn-outline-success"
+                                                @onclick="() => Encode(o.ClassOfferingId)">
+                                            Encode
+                                        </button>
+
+                                        <button type="button" class="btn btn-sm btn-outline-danger"
+                                                @onclick="() => DeleteOfferingAsync(o.ClassOfferingId)"
+                                                @attributes="DeleteButtonAttributes">
+                                            Delete
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </td>
+
+                    <td>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+                            <div style="min-width:190px;">
+                                <label><b>Section</b></label>
+                                <InputText class="form-control"
+                                           placeholder="e.g., BETET-2A-M"
+                                           @bind-Value="input.Section" />
+                            </div>
+
+                            <div style="min-width:150px;">
+                                <label><b>Type</b></label>
+                                <InputSelect class="form-control" TValue="ClassType" @bind-Value="input.ClassType">
+                                    <option value="@ClassType.Lecture">Lecture</option>
+                                    <option value="@ClassType.Laboratory">Laboratory</option>
+                                </InputSelect>
+                            </div>
+
+                            <button type="button" class="btn btn-primary"
+                                    @onclick="() => CreateOfferingAsync(s, input)"
+                                    @attributes="CreateOfferingButtonAttributes">
+                                Create
+                            </button>
+                        </div>
+
+                        <small class="text-muted">
+                            Create one offering per section/type. Delete old “TBD” offerings once you’ve created the real ones.
+                        </small>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool loading = true;
+    private bool deleting = false;
+
+    private string? message;
+    private string messageCss = "text-muted";
+
+    private List<SubjectCatalog> subjects = new();
+    private List<ClassOffering> offerings = new();
+
+    private FilterModel filter = new()
+    {
+        Term = "2nd Semester",
+        SchoolYear = "2025-2026"
+    };
+
+    private Dictionary<string, CreateOfferingInput> createInputs = new();
+
+    protected override async Task OnInitializedAsync()
+        => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        message = null;
+
+        try
+        {
+            var term = (filter.Term ?? "").Trim();
+            var sy = (filter.SchoolYear ?? "").Trim();
+
+            subjects = await Db.SubjectCatalogs
+                .AsNoTracking()
+                .Where(s => s.IsActive)
+                .OrderBy(s => s.SubjectCode)
+                .ToListAsync();
+
+            offerings = await Db.ClassOfferings
+                .AsNoTracking()
+                .Where(c => c.Term == term && c.SchoolYear == sy)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            messageCss = "text-danger";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task CreateOfferingAsync(SubjectCatalog subject, CreateOfferingInput input)
+    {
+        try
+        {
+            message = null;
+
+            var term = (filter.Term ?? "").Trim();
+            var sy = (filter.SchoolYear ?? "").Trim();
+            var section = (input.Section ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(section))
+            {
+                message = "Section is required (example: BETET-2A-M).";
+                messageCss = "text-danger";
+                return;
+            }
+
+            loading = true;
+
+            var exists = await Db.ClassOfferings.FirstOrDefaultAsync(c =>
+                c.SubjectCode == subject.SubjectCode &&
+                c.Term == term &&
+                c.SchoolYear == sy &&
+                c.ClassType == input.ClassType &&
+                c.CourseYearSection == section);
+
+            if (exists is not null)
+            {
+                message = $"Offering already exists (ID {exists.ClassOfferingId}) for {section} • {input.ClassType}.";
+                messageCss = "text-muted";
+                return;
+            }
+
+            var entity = new ClassOffering
+            {
+                SubjectCode = subject.SubjectCode,
+                SubjectTitle = subject.SubjectTitle,
+                Units = subject.Units,
+                Term = term,
+                SchoolYear = sy,
+                CourseYearSection = section,
+                Days = "",
+                Time = "",
+                ClassType = input.ClassType
+            };
+
+            Db.ClassOfferings.Add(entity);
+            await Db.SaveChangesAsync();
+
+            message = $"Created offering ID {entity.ClassOfferingId} for {section} • {entity.ClassType}.";
+            messageCss = "text-success";
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            messageCss = "text-danger";
+        }
+        finally
+        {
+            loading = false;
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteOfferingAsync(int classOfferingId)
+    {
+        deleting = true;
+        message = null;
+
+        try
+        {
+            // Safety checks
+            var hasEnrollments = await Db.Enrollments.AnyAsync(e => e.ClassOfferingId == classOfferingId);
+            if (hasEnrollments)
+            {
+                message = "Cannot delete: this offering has enrolled students (Roster). Remove roster entries first.";
+                messageCss = "text-danger";
+                return;
+            }
+
+            var hasComponents = await Db.GradingComponents.AnyAsync(c => c.ClassOfferingId == classOfferingId);
+            if (hasComponents)
+            {
+                message = "Cannot delete: this offering already has grading components/items configured. Delete those first.";
+                messageCss = "text-danger";
+                return;
+            }
+
+            var entity = await Db.ClassOfferings.FirstOrDefaultAsync(o => o.ClassOfferingId == classOfferingId);
+            if (entity is null)
+            {
+                message = "Offering not found.";
+                messageCss = "text-danger";
+                return;
+            }
+
+            Db.ClassOfferings.Remove(entity);
+            await Db.SaveChangesAsync();
+
+            message = $"Deleted offering ID {classOfferingId}.";
+            messageCss = "text-success";
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            messageCss = "text-danger";
+        }
+        finally
+        {
+            deleting = false;
+            await LoadAsync();
+        }
+    }
+
+    private void Manage(int classOfferingId)
+        => Nav.NavigateTo($"/admin/classoffering/{classOfferingId}/roster");
+
+    private void Configure(int classOfferingId)
+        => Nav.NavigateTo($"/admin/classoffering/{classOfferingId}/configure");
+
+    private void Encode(int classOfferingId)
+        => Nav.NavigateTo($"/scorer/classoffering/{classOfferingId}/encode");
+
+    private Dictionary<string, object> RefreshButtonAttributes
+    {
+        get
+        {
+            var attrs = new Dictionary<string, object>();
+            if (loading) attrs["disabled"] = "disabled";
+            return attrs;
+        }
+    }
+
+    private Dictionary<string, object> CreateOfferingButtonAttributes
+    {
+        get
+        {
+            var attrs = new Dictionary<string, object>();
+            if (loading) attrs["disabled"] = "disabled";
+            return attrs;
+        }
+    }
+
+    private Dictionary<string, object> DeleteButtonAttributes
+    {
+        get
+        {
+            var attrs = new Dictionary<string, object>();
+            if (loading || deleting) attrs["disabled"] = "disabled";
+            return attrs;
+        }
+    }
+
+    private sealed class FilterModel
+    {
+        public string? Term { get; set; }
+        public string? SchoolYear { get; set; }
+    }
+
+    private sealed class CreateOfferingInput
+    {
+        public string? Section { get; set; }
+        public ClassType ClassType { get; set; } = ClassType.Lecture;
+    }
+}

@@ -1,0 +1,125 @@
+﻿@page "/student/subjects"
+@rendermode InteractiveServer
+
+@using System.Security.Claims
+@using GradeProgressMonitoring.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+
+@attribute [Authorize(Roles = "Student")]
+
+@inject ApplicationDbContext Db
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+
+<h3>My Subjects</h3>
+
+@if (loading)
+{
+    <p>Loading...</p>
+}
+else if (rows.Count == 0)
+{
+    <p class="text-muted">You are not enrolled in any class offerings yet.</p>
+    <p class="text-muted">If this is your first time, go to <b>Claim Enrollment</b> to link your account.</p>
+}
+else
+{
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>Subject</th>
+                <th>Title</th>
+                <th style="width:140px;">Type</th>
+                <th style="width:170px;">Term / SY</th>
+                <th style="width:180px;">Section</th>
+                <th style="width:140px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in rows)
+            {
+                <tr>
+                    <td><b>@r.SubjectCode</b></td>
+                    <td>@r.SubjectTitle</td>
+                    <td>@r.ClassType</td>
+                    <td>@r.Term / @r.SchoolYear</td>
+                    <td>@r.Section</td>
+                    <td>
+                        <button class="btn btn-sm btn-primary"
+                                type="button"
+                                @onclick="@(() => ViewGrades(r.ClassOfferingId))">
+                            View Grades
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool loading = true;
+    private readonly List<Row> rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        rows.Clear();
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            loading = false;
+            return;
+        }
+
+        rows.AddRange(await Db.Enrollments
+            .AsNoTracking()
+            .Where(e => e.StudentUserId == userId)
+            .Join(
+                Db.ClassOfferings.AsNoTracking(),
+                e => e.ClassOfferingId,
+                o => o.ClassOfferingId,
+                (e, o) => new Row
+                {
+                    ClassOfferingId = o.ClassOfferingId,
+                    SubjectCode = o.SubjectCode,
+                    SubjectTitle = o.SubjectTitle,
+                    ClassType = o.ClassType.ToString(),
+                    Term = o.Term,
+                    SchoolYear = o.SchoolYear,
+                    Section = e.Section ?? o.CourseYearSection
+                }
+            )
+            .OrderBy(r => r.SubjectCode)
+            .ThenBy(r => r.ClassType)
+            .ThenBy(r => r.Section)
+            .ToListAsync());
+
+        loading = false;
+    }
+
+    private void ViewGrades(int classOfferingId)
+        => Nav.NavigateTo($"/student/classoffering/{classOfferingId}/grades");
+
+    private sealed class Row
+    {
+        public int ClassOfferingId { get; set; }
+        public string SubjectCode { get; set; } = "";
+        public string SubjectTitle { get; set; } = "";
+        public string ClassType { get; set; } = "";
+        public string Term { get; set; } = "";
+        public string SchoolYear { get; set; } = "";
+        public string Section { get; set; } = "";
+    }
+}

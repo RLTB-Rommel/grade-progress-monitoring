@@ -1,0 +1,180 @@
+﻿@implements IDisposable
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Routing
+
+@inject NavigationManager NavigationManager
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">Grade Progress Monitoring</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+
+        <!-- HOME -->
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-house-door-fill-nav-menu"></span>
+                Home
+            </NavLink>
+        </div>
+
+        <AuthorizeView>
+            <Authorized Context="authUser">
+
+                <!-- ================= STUDENT ================= -->
+                <AuthorizeView Roles="Student">
+                    <Authorized>
+                        <div class="nav-section-label px-3 mt-3 mb-1">
+                            STUDENT
+                        </div>
+
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="student/subjects">
+                                <span class="bi bi-journal-text-nav-menu"></span>
+                                My Subjects
+                            </NavLink>
+                        </div>
+
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="student/claim">
+                                <span class="bi bi-link-45deg-nav-menu"></span>
+                                Claim Enrollment
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+
+                <!-- ================= ADMIN ================= -->
+                <AuthorizeView Roles="Admin">
+                    <Authorized>
+                        <div class="nav-section-label px-3 mt-3 mb-1">
+                            ADMIN
+                        </div>
+
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link nav-link-center" href="admin/classoffering">
+                                <span class="bi bi-kanban-nav-menu"></span>
+                                Class Offerings
+                            </NavLink>
+                        </div>
+
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link nav-link-center" href="admin/subjects">
+                                <span class="bi bi-book-nav-menu"></span>
+                                Subject Catalog
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+
+                <!-- ================= SCORER ================= -->
+                <!-- Shows to Scorer users (and ALSO to Admin if Admin has Scorer role, which is okay) -->
+                <AuthorizeView Roles="Scorer">
+                    <Authorized>
+                        <div class="nav-section-label px-3 mt-3 mb-1">
+                            SCORER
+                        </div>
+
+                        <!-- IMPORTANT: this should point to your scorer landing page (list of offerings) -->
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="scorer/classofferings" Match="NavLinkMatch.Prefix">
+                                <span class="bi bi-pencil-square-nav-menu"></span>
+                                Encode Scores
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+
+                <!-- ================= CHECKER ================= -->
+                <!-- Keep hidden until checker pages are ready (leave commented if you want) -->
+                @*
+                <AuthorizeView Roles="Checker">
+                    <Authorized>
+                        <div class="nav-section-label px-3 mt-3 mb-1">
+                            CHECKER
+                        </div>
+
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="checker/review" Match="NavLinkMatch.Prefix">
+                                <span class="bi bi-clipboard-check-nav-menu"></span>
+                                Review & Approve
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+                *@
+
+                <!-- ================= ACCOUNT ================= -->
+                <div class="nav-section-label px-3 mt-3 mb-1">
+                    ACCOUNT
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link nav-link-center" href="Account/Manage">
+                        <span class="bi bi-person-fill-nav-menu"></span>
+                        @authUser.User.Identity?.Name
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <form action="/logout" method="post" @formname="logout-form">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="returnUrl" value="@SafeReturnUrl" />
+                        <button type="submit" class="nav-link nav-link-center btn btn-link p-0 w-100">
+                            <span class="bi bi-arrow-bar-left-nav-menu"></span>
+                            Logout
+                        </button>
+                    </form>
+                </div>
+
+            </Authorized>
+
+            <NotAuthorized>
+                <div class="nav-section-label px-3 mt-3 mb-1">
+                    ACCOUNT
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link nav-link-center" href="Account/Register">
+                        Register
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link nav-link-center" href="Account/Login">
+                        Login
+                    </NavLink>
+                </div>
+            </NotAuthorized>
+        </AuthorizeView>
+
+    </nav>
+</div>
+
+@code {
+    private string? currentRelativePath;
+
+    private string SafeReturnUrl => "/" + (currentRelativePath ?? string.Empty);
+
+    protected override void OnInitialized()
+    {
+        currentRelativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        currentRelativePath = NavigationManager.ToBaseRelativePath(e.Location);
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

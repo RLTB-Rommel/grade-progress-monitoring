@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.2.11415.280
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GradeProgressMonitoring", "GradeProgressMonitoring.csproj", "{2393406C-FEB1-5384-BFA2-4603484842CA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2393406C-FEB1-5384-BFA2-4603484842CA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2393406C-FEB1-5384-BFA2-4603484842CA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2393406C-FEB1-5384-BFA2-4603484842CA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2393406C-FEB1-5384-BFA2-4603484842CA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {4D6E6ECF-7809-4C97-AF35-461F2508E566}
+	EndGlobalSection
+EndGlobal

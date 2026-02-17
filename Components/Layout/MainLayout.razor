@@ -1,0 +1,27 @@
+﻿@inherits LayoutComponentBase
+
+<div class="page">
+    <!-- SIDEBAR / NAV -->
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <main>
+        <div class="content px-4">
+            @Body
+        </div>
+
+        <!-- GLOBAL FOOTER -->
+        <footer class="app-footer text-center">
+            <div class="container">
+                <div class="footer-line">
+                    © 2026 R. Aunario Enterprise
+                </div>
+                <div class="footer-subline">
+                    Grade Progress Monitoring System
+                </div>
+            </div>
+        </footer>
+    </main>
+</div>

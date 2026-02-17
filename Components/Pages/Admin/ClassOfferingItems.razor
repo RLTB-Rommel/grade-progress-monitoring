@@ -1,0 +1,286 @@
+﻿@page "/admin/classoffering/{Id:int}/items"
+@rendermode InteractiveServer
+
+@using Microsoft.EntityFrameworkCore
+@using GradeProgressMonitoring.Models
+@using GradeProgressMonitoring.Services
+@using System.Reflection
+
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+
+@inject GradeProgressMonitoring.Data.ApplicationDbContext Db
+@inject NavigationManager Nav
+
+<h3>Generated Grading Items</h3>
+
+<p class="text-muted">
+    Class Offering ID: <b>@Id</b>
+</p>
+
+<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:15px;">
+    <button type="button" class="btn btn-outline-secondary" @onclick="BackToList">Back to List</button>
+    <button type="button" class="btn btn-outline-primary" @onclick="BackToConfigure">Back to Configure</button>
+    <button type="button" class="btn btn-outline-primary" @onclick="GoRoster">Roster</button>
+
+    <!-- NEW: Admin score encoding entry point -->
+    <button type="button" class="btn btn-warning" @onclick="GoEncode">Encode Scores</button>
+</div>
+
+<hr />
+
+@if (loading)
+{
+    <p>Loading items...</p>
+}
+else if (!string.IsNullOrWhiteSpace(error))
+{
+    <p class="text-danger">@error</p>
+}
+else if (components.Count == 0)
+{
+    <p class="text-muted">
+        No grading components found for this class offering.
+        Go back to <b>Configure</b> and click <b>Save Configuration</b>.
+    </p>
+}
+else
+{
+    @foreach (var c in components)
+    {
+        var displayName = GradingTemplateService.GetComponentDisplayName(c.ComponentType, classType);
+        var itemsForComponent = itemsByComponentId.TryGetValue(c.GradingComponentId, out var list)
+            ? list
+            : new List<ComponentItem>();
+
+        <div class="card" style="max-width:1100px; margin-bottom:14px;">
+            <div class="card-body">
+                <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                    <div>
+                        <h5 style="margin-bottom:4px;">@displayName</h5>
+                        <div class="text-muted">
+                            Weight: <b>@c.WeightPercent</b>%
+                            • Enabled: <b>@(c.IsEnabled ? "Yes" : "No")</b>
+                        </div>
+                    </div>
+
+                    <div class="text-muted" style="align-self:center;">
+                        Items: <b>@itemsForComponent.Count</b>
+                    </div>
+                </div>
+
+                @if (!c.IsEnabled)
+                {
+                    <p class="text-muted" style="margin-top:10px;">
+                        This component is disabled.
+                    </p>
+                }
+                else if (itemsForComponent.Count == 0)
+                {
+                    <p class="text-muted" style="margin-top:10px;">
+                        No items generated for this component yet.
+                    </p>
+                }
+                else
+                {
+                    <div style="margin-top:10px;">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th style="width:140px;">Max</th>
+                                    <th style="width:140px;">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var i in itemsForComponent)
+                                {
+                                    <tr>
+                                        <td>@GetDisplayName(i)</td>
+                                        <td>@GetMax(i)</td>
+                                        <td>@GetStatus(i)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+
+                        <details style="margin-top:8px;">
+                            <summary class="text-muted">Show raw properties (debug)</summary>
+                            <div style="margin-top:8px;">
+                                @foreach (var i in itemsForComponent.Take(1))
+                                {
+                                    <ul class="text-muted" style="margin:0;">
+                                        @foreach (var kv in DumpProps(i))
+                                        {
+                                            <li><b>@kv.Key</b>: @kv.Value</li>
+                                        }
+                                    </ul>
+                                }
+                            </div>
+                        </details>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool loading = true;
+    private string? error;
+
+    private ClassType classType;
+
+    private List<GradingComponent> components = new();
+    private Dictionary<int, List<ComponentItem>> itemsByComponentId = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        loading = true;
+        error = null;
+
+        try
+        {
+            var offering = await Db.ClassOfferings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ClassOfferingId == Id);
+
+            if (offering is null)
+            {
+                error = "Class offering not found.";
+                return;
+            }
+
+            classType = offering.ClassType;
+
+            components = await Db.GradingComponents
+                .AsNoTracking()
+                .Where(x => x.ClassOfferingId == Id)
+                .OrderBy(x => x.ComponentType)
+                .ToListAsync();
+
+            var componentIds = components.Select(x => x.GradingComponentId).ToList();
+
+            var items = await Db.ComponentItems
+                .AsNoTracking()
+                .Where(i => componentIds.Contains(i.GradingComponentId))
+                .OrderBy(i => i.GradingComponentId)
+                .ToListAsync();
+
+            itemsByComponentId = items
+                .GroupBy(i => i.GradingComponentId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    // ---------- Navigation ----------
+    private void BackToList() => Nav.NavigateTo("/admin/classoffering");
+    private void BackToConfigure() => Nav.NavigateTo($"/admin/classoffering/{Id}/configure");
+    private void GoRoster() => Nav.NavigateTo($"/admin/classoffering/{Id}/roster");
+
+    // NEW: Admin can go to the score encoding page (shared with scorer)
+    private void GoEncode() => Nav.NavigateTo($"/scorer/classoffering/{Id}/encode");
+
+    // ---------- Reflection-based display helpers (works even if your property names differ) ----------
+
+    private static string GetDisplayName(ComponentItem item)
+    {
+        // Try common "name" fields first
+        var s =
+            GetString(item, "Title") ??
+            GetString(item, "Name") ??
+            GetString(item, "ItemName") ??
+            GetString(item, "Label") ??
+            GetString(item, "Description") ??
+            GetString(item, "Type") ??
+            null;
+
+        return string.IsNullOrWhiteSpace(s) ? $"ComponentItem #{GetInt(item, "ComponentItemId") ?? 0}" : s!;
+    }
+
+    private static string GetStatus(ComponentItem item)
+    {
+        // If you have IsOpen / IsActive / IsEnabled
+        var open = GetBool(item, "IsOpen") ?? GetBool(item, "IsActive") ?? GetBool(item, "IsEnabled");
+        if (open.HasValue) return open.Value ? "Open" : "Closed";
+
+        // If you have IsLocked (inverse)
+        var locked = GetBool(item, "IsLocked");
+        if (locked.HasValue) return locked.Value ? "Locked" : "Open";
+
+        return "-";
+    }
+
+    private static string GetMax(ComponentItem item)
+    {
+        // Try common numeric fields for max score/points
+        var max =
+            GetDecimal(item, "MaxScore") ??
+            GetDecimal(item, "MaxPoints") ??
+            GetDecimal(item, "PerfectScore") ??
+            GetDecimal(item, "TotalPoints") ??
+            GetDecimal(item, "Points") ??
+            null;
+
+        return max?.ToString("0.##") ?? "-";
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> DumpProps(object o)
+    {
+        var props = o.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        foreach (var p in props)
+        {
+            object? v = null;
+            try { v = p.GetValue(o); } catch { /* ignore */ }
+            yield return new KeyValuePair<string, string>(p.Name, v?.ToString() ?? "null");
+        }
+    }
+
+    private static string? GetString(object obj, string propName)
+        => GetProp(obj, propName)?.GetValue(obj)?.ToString();
+
+    private static int? GetInt(object obj, string propName)
+    {
+        var v = GetProp(obj, propName)?.GetValue(obj);
+        if (v is null) return null;
+        if (v is int i) return i;
+        if (int.TryParse(v.ToString(), out var parsed)) return parsed;
+        return null;
+    }
+
+    private static bool? GetBool(object obj, string propName)
+    {
+        var v = GetProp(obj, propName)?.GetValue(obj);
+        if (v is null) return null;
+        if (v is bool b) return b;
+        if (bool.TryParse(v.ToString(), out var parsed)) return parsed;
+        return null;
+    }
+
+    private static decimal? GetDecimal(object obj, string propName)
+    {
+        var v = GetProp(obj, propName)?.GetValue(obj);
+        if (v is null) return null;
+
+        if (v is decimal d) return d;
+        if (v is double db) return (decimal)db;
+        if (v is float f) return (decimal)f;
+        if (v is int i) return i;
+        if (v is long l) return l;
+
+        if (decimal.TryParse(v.ToString(), out var parsed)) return parsed;
+        return null;
+    }
+
+    private static PropertyInfo? GetProp(object obj, string propName)
+        => obj.GetType().GetProperty(propName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+}

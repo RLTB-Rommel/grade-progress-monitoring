@@ -1,0 +1,207 @@
+﻿@page "/student/claim"
+@rendermode InteractiveServer
+
+@using System.ComponentModel.DataAnnotations
+@using GradeProgressMonitoring.Data
+@using GradeProgressMonitoring.Models
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+
+@inject ApplicationDbContext Db
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+
+<h1>Claim Your Enrollment</h1>
+
+<p class="text-muted">
+    Enter your Student Number, Last Name, and Section exactly as listed in your class roster.
+    This links your login account to your enrollment so you can view your subjects and grades.
+</p>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+@if (!string.IsNullOrWhiteSpace(_success))
+{
+    <div class="alert alert-success">@_success</div>
+}
+
+<EditForm Model="Form" OnValidSubmit="LinkMyAccount" FormName="claimEnrollmentForm">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="row g-3" style="max-width: 980px;">
+        <div class="col-md-4">
+            <label class="form-label">Student No</label>
+            <InputText class="form-control" @bind-Value="Form.StudentNo" />
+            <ValidationMessage For="@(() => Form.StudentNo)" />
+        </div>
+
+        <div class="col-md-4">
+            <label class="form-label">Last Name</label>
+            <InputText class="form-control" @bind-Value="Form.LastName" />
+            <ValidationMessage For="@(() => Form.LastName)" />
+        </div>
+
+        <div class="col-md-4">
+            <label class="form-label">Section</label>
+            <InputText class="form-control" @bind-Value="Form.Section" />
+            <ValidationMessage For="@(() => Form.Section)" />
+        </div>
+
+        <div class="col-12" style="margin-top: 10px;">
+            <button type="submit" class="btn btn-primary">Link My Account</button>
+            <button type="button" class="btn btn-secondary ms-2" @onclick="Cancel">Cancel</button>
+        </div>
+    </div>
+</EditForm>
+
+@code {
+    private string? _error;
+    private string? _success;
+
+    // ✅ Blazor Web Apps form binding: can be overwritten with null, so keep nullable + no initializer
+    [SupplyParameterFromForm]
+    private ClaimForm? _form { get; set; }
+
+    // ✅ Safe accessor so code/bindings always use a non-null instance
+    private ClaimForm Form => _form ??= new ClaimForm();
+
+    private sealed class ClaimForm
+    {
+        [Required] public string StudentNo { get; set; } = "";
+        [Required] public string LastName { get; set; } = "";
+        [Required] public string Section { get; set; } = "";
+    }
+
+    private async Task LinkMyAccount()
+    {
+        _error = null;
+        _success = null;
+
+        var studentNo = Normalize(Form.StudentNo);
+        var lastNameInput = Normalize(Form.LastName);
+        var section = Normalize(Form.Section);
+
+        if (string.IsNullOrWhiteSpace(studentNo) ||
+            string.IsNullOrWhiteSpace(lastNameInput) ||
+            string.IsNullOrWhiteSpace(section))
+        {
+            _error = "Please fill out Student No, Last Name, and Section.";
+            return;
+        }
+
+        // ✅ Get current logged-in user
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var principal = authState.User;
+
+        var user = await UserManager.GetUserAsync(principal);
+        if (user is null)
+        {
+            _error = "You must be logged in to claim enrollment.";
+            return;
+        }
+
+        // ✅ Find ALL matching roster entries (not just one)
+        var matches = await Db.Enrollments
+            .Where(e => e.StudentNo == studentNo && e.Section == section)
+            .ToListAsync();
+
+        if (matches.Count == 0)
+        {
+            _error = "No matching roster entries found. Please confirm your Student No and Section match the roster exactly.";
+            return;
+        }
+
+        // ✅ Verify last name against any matching roster entry
+        bool lastNameOk = matches.Any(e =>
+        {
+            var rosterName = Normalize(e.StudentName);
+            var rosterLastName = ExtractLastName(rosterName);
+            return string.Equals(rosterLastName, lastNameInput, StringComparison.OrdinalIgnoreCase);
+        });
+
+        if (!lastNameOk)
+        {
+            _error = "Last Name does not match the roster entry. Please enter your last name exactly as listed.";
+            return;
+        }
+
+        // ✅ If ANY matching roster entry is linked to a different user, block
+        var linkedToOther = matches.FirstOrDefault(e =>
+            !string.IsNullOrWhiteSpace(e.StudentUserId) &&
+            !string.Equals(e.StudentUserId, user.Id, StringComparison.Ordinal));
+
+        if (linkedToOther is not null)
+        {
+            _error = "One or more roster entries are already linked to another account. Please contact your instructor to unlink first.";
+            return;
+        }
+
+        // ✅ Link ALL unlinked rows (or keep rows already linked to this same user)
+        var toLink = matches
+            .Where(e => string.IsNullOrWhiteSpace(e.StudentUserId) || e.StudentUserId == user.Id)
+            .ToList();
+
+        if (toLink.All(e => e.StudentUserId == user.Id))
+        {
+            _success = "Your enrollments are already linked to your account.";
+            Nav.NavigateTo("/student/subjects", forceLoad: true);
+            return;
+        }
+
+        foreach (var e in toLink)
+            e.StudentUserId = user.Id;
+
+        // OPTIONAL: keep StudentProfileId linkage too
+        // Create/attach one profile for this studentNo, then attach to all linked enrollments.
+        StudentProfile? profile = await Db.StudentProfiles.FirstOrDefaultAsync(p => p.StudentNo == studentNo);
+
+        if (profile is null)
+        {
+            profile = new StudentProfile
+            {
+                StudentNo = studentNo
+            };
+
+            Db.StudentProfiles.Add(profile);
+            await Db.SaveChangesAsync(); // to get StudentProfileId
+        }
+
+        foreach (var e in toLink)
+        {
+            if (e.StudentProfileId is null)
+                e.StudentProfileId = profile.StudentProfileId;
+        }
+
+        if (user.StudentProfileId is null)
+        {
+            user.StudentProfileId = profile.StudentProfileId;
+            await UserManager.UpdateAsync(user);
+        }
+
+        await Db.SaveChangesAsync();
+
+        _success = $"Enrollment(s) linked successfully! ({toLink.Count} subject offering(s))";
+        Nav.NavigateTo("/student/subjects", forceLoad: true);
+    }
+
+    private void Cancel() => Nav.NavigateTo("/student/subjects");
+
+    // -------- Helpers --------
+    private static string Normalize(string? s) => (s ?? "").Trim();
+
+    private static string ExtractLastName(string rosterName)
+    {
+        if (string.IsNullOrWhiteSpace(rosterName))
+            return "";
+
+        var commaIndex = rosterName.IndexOf(',');
+        var last = commaIndex >= 0 ? rosterName[..commaIndex] : rosterName;
+        return last.Trim();
+    }
+}

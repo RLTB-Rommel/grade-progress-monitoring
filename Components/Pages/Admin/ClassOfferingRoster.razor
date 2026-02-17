@@ -1,0 +1,300 @@
+@page "/admin/classoffering/{ClassOfferingId:int}/roster"
+@rendermode InteractiveServer
+@using System.ComponentModel.DataAnnotations
+@using GradeProgressMonitoring.Data
+@using GradeProgressMonitoring.Models
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components
+@inject ApplicationDbContext Db
+
+<h2>Roster / Enrollment</h2>
+
+@if (_isLoading)
+{
+    <p>Loading roster…</p>
+}
+else if (_offering is null)
+{
+    <p class="text-danger">Class offering not found.</p>
+}
+else
+{
+    <div style="margin-bottom: 12px;">
+        <div><strong>Offering:</strong> @_offering.SubjectCode — @_offering.SubjectTitle</div>
+        <div><strong>Term / SY:</strong> @_offering.Term / @_offering.SchoolYear</div>
+        <div><strong>Default Section:</strong> @_defaultSection</div>
+    </div>
+
+    <div class="card" style="max-width: 980px; margin-bottom: 14px;">
+        <div class="card-body">
+            <h5 class="card-title">Manual Encode (Add Student to Roster)</h5>
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="alert alert-danger">@_error</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_success))
+            {
+                <div class="alert alert-success">@_success</div>
+            }
+
+            <!-- IMPORTANT: no SupplyParameterFromForm here -->
+            <EditForm Model="_newStudent" OnValidSubmit="AddStudent" FormName="adminAddStudentForm">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Student No</label>
+                        <InputText class="form-control" @bind-Value="_newStudent.StudentNo" />
+                        <ValidationMessage For="@(() => _newStudent.StudentNo)" />
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">Student Name (LASTNAME, FIRSTNAME ...)</label>
+                        <InputText class="form-control" @bind-Value="_newStudent.StudentName" />
+                        <ValidationMessage For="@(() => _newStudent.StudentName)" />
+                    </div>
+
+                    <div class="col-md-3">
+                        <label class="form-label">Section</label>
+                        <InputText class="form-control" @bind-Value="_newStudent.Section" />
+                        <ValidationMessage For="@(() => _newStudent.Section)" />
+                        <div class="form-text">Leave blank to use Default Section.</div>
+                    </div>
+
+                    <div class="col-12">
+                        <button class="btn btn-primary" type="submit">Add to Roster</button>
+
+                        <!-- IMPORTANT: type="button" (must NOT submit the form) -->
+                        <button class="btn btn-secondary ms-2" type="button" @onclick="ResetForm">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th style="width:170px;">Student No</th>
+                <th>Student Name</th>
+                <th style="width:170px;">Section</th>
+                <th style="width:380px;">Link Status</th>
+                <th style="width:260px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (_enrollments.Count == 0)
+            {
+                <tr><td colspan="5">No roster entries yet.</td></tr>
+            }
+            else
+            {
+                @foreach (var e in _enrollments)
+                {
+                    var isLinked = !string.IsNullOrWhiteSpace(e.StudentUserId);
+
+                    <tr>
+                        <td>@e.StudentNo</td>
+                        <td>@e.StudentName</td>
+                        <td>@e.Section</td>
+                        <td>
+                            @if (isLinked)
+                            {
+                                <span class="badge bg-success">Linked</span>
+                                <span class="text-muted" style="margin-left:6px;">→ @e.StudentUserId</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Not linked</span>
+                            }
+                        </td>
+                        <td class="d-flex gap-2">
+                            @if (isLinked)
+                            {
+                                <button type="button"
+                                        class="btn btn-outline-warning btn-sm"
+                                        @onclick="() => UnlinkEnrollment(e.EnrollmentId)">
+                                    Unlink
+                                </button>
+
+                                <button type="button"
+                                        class="btn btn-outline-danger btn-sm"
+                                        disabled
+                                        title="Unlink first to enable remove">
+                                    Remove
+                                </button>
+                            }
+                            else
+                            {
+                                <button type="button"
+                                        class="btn btn-outline-danger btn-sm"
+                                        @onclick="() => RemoveEnrollment(e.EnrollmentId)">
+                                    Remove
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    [Parameter] public int ClassOfferingId { get; set; }
+
+    private bool _isLoading = true;
+    private ClassOffering? _offering;
+    private List<Enrollment> _enrollments = new();
+
+    private string _defaultSection = "";
+    private string? _error;
+    private string? _success;
+
+    // IMPORTANT: plain model (no SupplyParameterFromForm)
+    private NewStudentForm _newStudent = new();
+
+    private sealed class NewStudentForm
+    {
+        [Required] public string StudentNo { get; set; } = "";
+        [Required] public string StudentName { get; set; } = "";
+        public string? Section { get; set; } = "";
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _isLoading = true;
+        _error = null;
+        _success = null;
+
+        _offering = await Db.ClassOfferings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(o => o.ClassOfferingId == ClassOfferingId);
+
+        _defaultSection = _offering?.CourseYearSection ?? "";
+
+        // initialize form defaults
+        ResetForm();
+
+        await LoadEnrollments();
+        _isLoading = false;
+    }
+
+    private async Task LoadEnrollments()
+    {
+        _enrollments = await Db.Enrollments
+            .AsNoTracking()
+            .Where(e => e.ClassOfferingId == ClassOfferingId)
+            .OrderBy(e => e.StudentNo)
+            .ToListAsync();
+    }
+
+    private async Task AddStudent()
+    {
+        _error = null;
+        _success = null;
+
+        var studentNo = (_newStudent.StudentNo ?? "").Trim();
+        var studentName = (_newStudent.StudentName ?? "").Trim();
+        var section = (_newStudent.Section ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(section))
+            section = _defaultSection;
+
+        if (string.IsNullOrWhiteSpace(studentNo) ||
+            string.IsNullOrWhiteSpace(studentName) ||
+            string.IsNullOrWhiteSpace(section))
+        {
+            _error = "Student No, Student Name, and Section are required.";
+            return;
+        }
+
+        var exists = await Db.Enrollments.AnyAsync(e =>
+            e.ClassOfferingId == ClassOfferingId &&
+            e.StudentNo == studentNo);
+
+        if (exists)
+        {
+            _error = $"Student No {studentNo} is already in this roster.";
+            return;
+        }
+
+        Db.Enrollments.Add(new Enrollment
+        {
+            ClassOfferingId = ClassOfferingId,
+            StudentNo = studentNo,
+            StudentName = studentName,
+            Section = section,
+            StudentProfileId = null,
+            StudentUserId = null
+        });
+
+        await Db.SaveChangesAsync();
+
+        _success = "Student added to roster.";
+        ResetForm();
+        await LoadEnrollments();
+    }
+
+    private async Task UnlinkEnrollment(int enrollmentId)
+    {
+        _error = null;
+        _success = null;
+
+        var entity = await Db.Enrollments.FirstOrDefaultAsync(e =>
+            e.EnrollmentId == enrollmentId && e.ClassOfferingId == ClassOfferingId);
+
+        if (entity is null)
+        {
+            _error = "Enrollment not found.";
+            return;
+        }
+
+        entity.StudentUserId = null;
+        await Db.SaveChangesAsync();
+
+        _success = "Enrollment unlinked.";
+        await LoadEnrollments();
+    }
+
+    private async Task RemoveEnrollment(int enrollmentId)
+    {
+        _error = null;
+        _success = null;
+
+        var entity = await Db.Enrollments.FirstOrDefaultAsync(e =>
+            e.EnrollmentId == enrollmentId && e.ClassOfferingId == ClassOfferingId);
+
+        if (entity is null)
+        {
+            _error = "Enrollment not found.";
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(entity.StudentUserId))
+        {
+            _error = "Cannot remove a linked enrollment. Unlink first.";
+            return;
+        }
+
+        Db.Enrollments.Remove(entity);
+        await Db.SaveChangesAsync();
+
+        _success = "Student removed from roster.";
+        await LoadEnrollments();
+    }
+
+    private void ResetForm()
+    {
+        _newStudent = new NewStudentForm
+        {
+            StudentNo = "",
+            StudentName = "",
+            Section = _defaultSection
+        };
+    }
+}

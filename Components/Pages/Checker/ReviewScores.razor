@@ -1,0 +1,446 @@
+﻿@page "/checker/classoffering/{Id:int}/review"
+@rendermode InteractiveServer
+
+@using GradeProgressMonitoring.Models
+@using GradeProgressMonitoring.Data
+@using GradeProgressMonitoring.Services
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Authorization
+
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Checker")]
+
+@inject ApplicationDbContext Db
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+
+<h3>Checker Review</h3>
+
+@if (loading)
+{
+    <p>Loading...</p>
+}
+else if (offering is null)
+{
+    <p class="text-danger">Class offering not found.</p>
+}
+else
+{
+    <div style="margin-bottom:12px;">
+        <p style="margin:0;"><b>@offering.SubjectCode</b> — @offering.SubjectTitle</p>
+        <p style="margin:0;">@offering.CourseYearSection • @offering.Term / @offering.SchoolYear • <b>@offering.ClassType</b></p>
+
+        <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-outline-secondary" @onclick="BackToList">Back</button>
+            <button type="button" class="btn btn-primary" @onclick="GoRoster">Roster</button>
+            <button type="button" class="btn btn-outline-dark" @onclick="GoScorerEncode" disabled="@(!CanGoToScorerEncode)">
+                Go to Scorer Encode
+            </button>
+        </div>
+    </div>
+
+    <hr />
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; max-width: 900px;">
+        <div>
+            <label><b>Component</b></label>
+            <InputSelect class="form-control"
+                         TValue="int"
+                         @bind-Value="selectedComponentId"
+                         @bind-Value:after="OnComponentChanged">
+                <option value="0">-- select --</option>
+                @foreach (var c in components)
+                {
+                    <option value="@c.GradingComponentId">@GetCompName(c)</option>
+                }
+            </InputSelect>
+        </div>
+
+        <div>
+            <label><b>Item</b></label>
+            <InputSelect class="form-control"
+                         TValue="int"
+                         @bind-Value="selectedItemId"
+                         @bind-Value:after="OnItemChanged"
+                         disabled="@IsItemSelectDisabled">
+                <option value="0">-- select --</option>
+                @foreach (var i in itemsForSelectedComponent)
+                {
+                    <option value="@i.ComponentItemId">@i.Label</option>
+                }
+            </InputSelect>
+        </div>
+    </div>
+
+    @if (selectedItem is not null)
+    {
+        <div style="margin-top:12px;">
+            <div class="d-flex gap-3 flex-wrap align-items-center">
+                <span>
+                    <b>Open for encoding:</b>
+                    @if (selectedItem.IsOpenForEncoding)
+                    {
+                        <span class="text-success">Yes</span>
+                    }
+                    else
+                    {
+
+                        <span class="text-danger">No</span>
+                    }
+                </span>
+
+                <span>
+                    <b>Locked:</b>
+                    @if (selectedItem.IsLocked)
+                    {
+                        <span class="text-danger">Yes</span>
+                    }
+                    else
+                    {
+
+                        <span class="text-success">No</span>
+                    }
+                </span>
+
+                <span>
+                    <b>Approved:</b>
+                    @if (selectedItem.IsApproved)
+                    {
+                        <span class="text-success">Yes</span>
+                    }
+                    else
+                    {
+
+                        <span class="text-muted">No</span>
+                    }
+                </span>
+            </div>
+
+            <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+                <button type="button" class="btn btn-sm btn-outline-primary"
+                        @onclick="ToggleOpenAsync" disabled="@busy">
+                    @(busy ? "Working..." : (selectedItem.IsOpenForEncoding ? "Close Encoding" : "Open Encoding"))
+                </button>
+
+                <button type="button" class="btn btn-sm btn-outline-warning"
+                        @onclick="ToggleLockAsync" disabled="@busy">
+                    @(busy ? "Working..." : (selectedItem.IsLocked ? "Unlock Item" : "Lock Item"))
+                </button>
+
+                <button type="button" class="btn btn-sm btn-success"
+                        @onclick="ApproveAsync" disabled="@busy || selectedItem.IsApproved">
+                    Approve
+                </button>
+
+                <button type="button" class="btn btn-sm btn-outline-danger"
+                        @onclick="UnapproveAsync" disabled="@busy || !selectedItem.IsApproved">
+                    Unapprove
+                </button>
+
+                @if (!string.IsNullOrWhiteSpace(statusMsg))
+                {
+                    <span class="@statusCss">@statusMsg</span>
+                }
+            </div>
+        </div>
+
+        <hr />
+    }
+
+    @if (selectedItem is null)
+    {
+        <p>Please select a component and item.</p>
+    }
+    else if (enrollments.Count == 0)
+    {
+        <p>No students enrolled yet.</p>
+    }
+    else
+    {
+        <h5>Score Review</h5>
+
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th style="width:160px;">Student No</th>
+                    <th>Name</th>
+                    <th style="width:160px;">Score</th>
+                    <th style="width:220px;">Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in reviewRows)
+                {
+                    <tr>
+                        <td>@r.StudentNo</td>
+                        <td>@r.StudentName</td>
+                        <td>
+                            @if (!r.IsLinked)
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                            else if (!r.Score.HasValue)
+                            {
+                                <span class="text-danger">Missing</span>
+                            }
+                            else
+                            {
+                                <span>@r.Score</span>
+                            }
+                        </td>
+                        <td>
+                            @if (!r.IsLinked)
+                            {
+                                <span class="text-danger">Not linked to user</span>
+                            }
+                            else if (!r.Score.HasValue)
+                            {
+                                <span class="text-warning">No entry yet</span>
+                            }
+                            else if (r.Score.Value < 0 || r.Score.Value > selectedItem.MaxScore)
+                            {
+                                <span class="text-danger">Out of range</span>
+                            }
+                            else
+                            {
+                                <span class="text-success">OK</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <div class="text-muted">
+            <b>Summary:</b>
+            @okCount OK • @missingCount Missing • @notLinkedCount Not linked
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool loading = true;
+    private bool busy = false;
+
+    private ClassOffering? offering;
+
+    private List<GradingComponent> components = new();
+    private List<ComponentItem> itemsForSelectedComponent = new();
+    private List<Enrollment> enrollments = new();
+
+    private int selectedComponentId = 0;
+    private int selectedItemId = 0;
+
+    private GradingComponent? selectedComponent;
+    private ComponentItem? selectedItem;
+
+    private string? statusMsg;
+    private string statusCss = "text-muted";
+
+    private List<ReviewRow> reviewRows = new();
+    private int okCount, missingCount, notLinkedCount;
+
+    private bool IsItemSelectDisabled => selectedComponent is null || itemsForSelectedComponent.Count == 0;
+    private bool CanGoToScorerEncode => selectedItem is not null; // you can change this rule
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+
+        offering = await Db.ClassOfferings.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ClassOfferingId == Id);
+
+        components = await Db.GradingComponents.AsNoTracking()
+            .Where(x => x.ClassOfferingId == Id && x.IsEnabled)
+            .OrderBy(x => x.ComponentType)
+            .ToListAsync();
+
+        enrollments = await Db.Enrollments.AsNoTracking()
+            .Where(x => x.ClassOfferingId == Id)
+            .OrderBy(x => x.StudentNo)
+            .ThenBy(x => x.StudentName)
+            .ToListAsync();
+
+        loading = false;
+    }
+
+    private string GetCompName(GradingComponent c)
+    {
+        if (offering is null) return c.ComponentType.ToString();
+        return GradingTemplateService.GetComponentDisplayName(c.ComponentType, offering.ClassType);
+    }
+
+    private async Task OnComponentChanged()
+    {
+        selectedItemId = 0;
+        selectedItem = null;
+        statusMsg = null;
+
+        selectedComponent = components.FirstOrDefault(x => x.GradingComponentId == selectedComponentId);
+        itemsForSelectedComponent = new();
+        reviewRows = new();
+
+        if (selectedComponent is null) return;
+
+        itemsForSelectedComponent = await Db.ComponentItems.AsNoTracking()
+            .Where(i => i.GradingComponentId == selectedComponent.GradingComponentId)
+            .OrderBy(i => i.OrderNo)
+            .ToListAsync();
+    }
+
+    private async Task OnItemChanged()
+    {
+        statusMsg = null;
+
+        selectedItem = itemsForSelectedComponent.FirstOrDefault(x => x.ComponentItemId == selectedItemId);
+        if (selectedItem is null)
+        {
+            reviewRows = new();
+            return;
+        }
+
+        await BuildReviewAsync();
+    }
+
+    private async Task BuildReviewAsync()
+    {
+        if (selectedItem is null) return;
+
+        var existing = await Db.ScoreEntries.AsNoTracking()
+            .Where(s => s.ComponentItemId == selectedItem.ComponentItemId)
+            .ToListAsync();
+
+        reviewRows = new();
+        okCount = missingCount = notLinkedCount = 0;
+
+        foreach (var e in enrollments)
+        {
+            var linked = !string.IsNullOrWhiteSpace(e.StudentUserId);
+            decimal? score = null;
+
+            if (linked)
+            {
+                score = existing.FirstOrDefault(x => x.StudentUserId == e.StudentUserId)?.Score;
+            }
+
+            var row = new ReviewRow
+            {
+                StudentNo = e.StudentNo ?? "",
+                StudentName = e.StudentName ?? "",
+                IsLinked = linked,
+                Score = score
+            };
+
+            if (!linked) notLinkedCount++;
+            else if (!score.HasValue) missingCount++;
+            else if (score.Value >= 0 && score.Value <= selectedItem.MaxScore) okCount++;
+
+            reviewRows.Add(row);
+        }
+    }
+
+    private async Task ToggleOpenAsync()
+    {
+        if (selectedItem is null) return;
+        await UpdateItemAsync(item =>
+        {
+            item.IsOpenForEncoding = !item.IsOpenForEncoding;
+        }, "Open/Close updated.");
+    }
+
+    private async Task ToggleLockAsync()
+    {
+        if (selectedItem is null) return;
+        await UpdateItemAsync(item =>
+        {
+            item.IsLocked = !item.IsLocked;
+        }, "Lock updated.");
+    }
+
+    private async Task ApproveAsync()
+    {
+        if (selectedItem is null) return;
+
+        // Optional rule: don’t approve if there are missing scores
+        // if (missingCount > 0 || notLinkedCount > 0) { ... }
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        await UpdateItemAsync(item =>
+        {
+            item.IsApproved = true;
+            item.ApprovedAt = DateTime.Now;
+            item.ApprovedByUserId = userId;
+            item.IsLocked = true; // approving locks it
+        }, "Approved.");
+    }
+
+    private async Task UnapproveAsync()
+    {
+        if (selectedItem is null) return;
+        await UpdateItemAsync(item =>
+        {
+            item.IsApproved = false;
+            item.ApprovedAt = null;
+            item.ApprovedByUserId = null;
+            // keep locked or unlock? your choice:
+            item.IsLocked = false;
+        }, "Unapproved.");
+    }
+
+    private async Task UpdateItemAsync(Action<ComponentItem> apply, string okMessage)
+    {
+        busy = true;
+        statusMsg = null;
+
+        try
+        {
+            var entity = await Db.ComponentItems
+                .FirstOrDefaultAsync(i => i.ComponentItemId == selectedItem!.ComponentItemId);
+
+            if (entity is null) return;
+
+            apply(entity);
+            await Db.SaveChangesAsync();
+
+            // refresh selectedItem snapshot
+            selectedItem.IsOpenForEncoding = entity.IsOpenForEncoding;
+            selectedItem.IsLocked = entity.IsLocked;
+            selectedItem.IsApproved = entity.IsApproved;
+            selectedItem.ApprovedAt = entity.ApprovedAt;
+            selectedItem.ApprovedByUserId = entity.ApprovedByUserId;
+
+            statusMsg = okMessage;
+            statusCss = "text-success";
+        }
+        catch (Exception ex)
+        {
+            statusMsg = ex.Message;
+            statusCss = "text-danger";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void BackToList() => Nav.NavigateTo("/admin/classoffering");
+    private void GoRoster() => Nav.NavigateTo($"/admin/classoffering/{Id}/roster");
+    private void GoScorerEncode() => Nav.NavigateTo($"/scorer/classoffering/{Id}/encode");
+
+    private sealed class ReviewRow
+    {
+        public string StudentNo { get; set; } = "";
+        public string StudentName { get; set; } = "";
+        public bool IsLinked { get; set; }
+        public decimal? Score { get; set; }
+    }
+}

@@ -1,0 +1,214 @@
+﻿@page "/admin/classoffering/create"
+
+@using GradeProgressMonitoring.Models
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Routing
+
+@inject GradeProgressMonitoring.Data.ApplicationDbContext Db
+@inject NavigationManager Nav
+
+<h3>@(IsPopulateMode ? "Populate Class Offering" : "Create Class Offering")</h3>
+
+@if (IsPopulateMode)
+{
+    <p class="text-muted" style="margin-top:-8px;">
+        Pre-filled from Subject Dashboard. You can still edit schedule/section before saving.
+    </p>
+}
+
+<EditForm Model="form" OnValidSubmit="SaveAsync">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; max-width: 900px;">
+        <div>
+            <label><b>Subject Code</b></label>
+            <InputText class="form-control" @bind-Value="form.SubjectCode" disabled="@LockSubjectFields" />
+        </div>
+
+        <div>
+            <label><b>Subject Title</b></label>
+            <InputText class="form-control" @bind-Value="form.SubjectTitle" disabled="@LockSubjectFields" />
+        </div>
+
+        <div>
+            <label><b>Units</b></label>
+            <InputNumber class="form-control" @bind-Value="form.Units" disabled="@LockSubjectFields" />
+        </div>
+
+        <div>
+            <label><b>Course-Year-Section</b></label>
+            <InputText class="form-control" @bind-Value="form.CourseYearSection" />
+            <small class="text-muted">Example: BSEE-2A</small>
+        </div>
+
+        <div>
+            <label><b>Class Type</b></label>
+            <InputSelect class="form-control" @bind-Value="form.ClassType">
+                <option value="@ClassType.Lecture">Lecture</option>
+                <option value="@ClassType.Laboratory">Laboratory</option>
+            </InputSelect>
+        </div>
+
+        <div>
+            <label><b>Term</b></label>
+            <InputText class="form-control" @bind-Value="form.Term" disabled="@LockTermSyFields" />
+            <small class="text-muted">Example: 2nd Semester</small>
+        </div>
+
+        <div>
+            <label><b>School Year</b></label>
+            <InputText class="form-control" @bind-Value="form.SchoolYear" disabled="@LockTermSyFields" />
+            <small class="text-muted">Example: 2025-2026</small>
+        </div>
+
+        <div>
+            <label><b>Days</b></label>
+            <InputText class="form-control" @bind-Value="form.Days" />
+            <small class="text-muted">Example: M/W/F</small>
+        </div>
+
+        <div>
+            <label><b>Time</b></label>
+            <InputText class="form-control" @bind-Value="form.Time" />
+            <small class="text-muted">Example: 8:00–10:00 AM</small>
+        </div>
+    </div>
+
+    <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
+        <button class="btn btn-primary" type="submit" disabled="@saving">
+            @(saving ? "Saving..." : "Save")
+        </button>
+
+        <button class="btn btn-outline-secondary" type="button" @onclick="Back">
+            Cancel
+        </button>
+
+        @if (!string.IsNullOrWhiteSpace(message))
+        {
+            <span class="@messageCss">@message</span>
+        }
+    </div>
+</EditForm>
+
+@code {
+    // ---- Query params from the "Populate" button on ClassOfferingList ----
+    [SupplyParameterFromQuery(Name = "code")] public string? QCode { get; set; }
+    [SupplyParameterFromQuery(Name = "title")] public string? QTitle { get; set; }
+    [SupplyParameterFromQuery(Name = "units")] public string? QUnits { get; set; }
+    [SupplyParameterFromQuery(Name = "term")] public string? QTerm { get; set; }
+    [SupplyParameterFromQuery(Name = "sy")] public string? QSy { get; set; }
+
+    // When coming from Populate, we lock subject fields by default
+    private bool IsPopulateMode =>
+        !string.IsNullOrWhiteSpace(QCode) ||
+        !string.IsNullOrWhiteSpace(QTitle) ||
+        !string.IsNullOrWhiteSpace(QTerm) ||
+        !string.IsNullOrWhiteSpace(QSy);
+
+    private bool LockSubjectFields => IsPopulateMode;
+    private bool LockTermSyFields => IsPopulateMode;
+
+    private bool saving = false;
+    private string? message;
+    private string messageCss = "text-muted";
+
+    private CreateClassOfferingForm form = new();
+
+    protected override void OnParametersSet()
+    {
+        // Auto-fill only if query params exist AND form fields are still empty/default
+        if (!IsPopulateMode) return;
+
+        if (!string.IsNullOrWhiteSpace(QCode) && string.IsNullOrWhiteSpace(form.SubjectCode))
+            form.SubjectCode = QCode.Trim();
+
+        if (!string.IsNullOrWhiteSpace(QTitle) && string.IsNullOrWhiteSpace(form.SubjectTitle))
+            form.SubjectTitle = QTitle.Trim();
+
+        if (!string.IsNullOrWhiteSpace(QTerm) && string.IsNullOrWhiteSpace(form.Term))
+            form.Term = QTerm.Trim();
+
+        if (!string.IsNullOrWhiteSpace(QSy) && string.IsNullOrWhiteSpace(form.SchoolYear))
+            form.SchoolYear = QSy.Trim();
+
+        if (!string.IsNullOrWhiteSpace(QUnits) && form.Units == 0m && decimal.TryParse(QUnits, out var u))
+            form.Units = u;
+    }
+
+    private async Task SaveAsync()
+    {
+        saving = true;
+        message = null;
+
+        try
+        {
+            var subjectCode = form.SubjectCode.Trim();
+            var term = (form.Term ?? "").Trim();
+            var sy = (form.SchoolYear ?? "").Trim();
+            var section = form.CourseYearSection.Trim();
+
+            // Prevent duplicates: if already exists, go manage it instead
+            var existing = await Db.ClassOfferings.FirstOrDefaultAsync(c =>
+                c.SubjectCode == subjectCode &&
+                c.Term == term &&
+                c.SchoolYear == sy &&
+                c.CourseYearSection == section);
+
+            if (existing is not null)
+            {
+                message = "Class offering already exists. Redirecting...";
+                messageCss = "text-warning";
+                Nav.NavigateTo($"/admin/classoffering/{existing.ClassOfferingId}/roster");
+                return;
+            }
+
+            var entity = new ClassOffering
+            {
+                SubjectCode = subjectCode,
+                SubjectTitle = form.SubjectTitle.Trim(),
+                Units = form.Units,
+                CourseYearSection = section,
+                ClassType = form.ClassType,
+                Term = term,
+                SchoolYear = sy,
+                Days = (form.Days ?? "").Trim(),
+                Time = (form.Time ?? "").Trim()
+            };
+
+            Db.ClassOfferings.Add(entity);
+            await Db.SaveChangesAsync();
+
+            Nav.NavigateTo($"/admin/classoffering/{entity.ClassOfferingId}/roster");
+        }
+        catch (Exception ex)
+        {
+            message = ex.Message;
+            messageCss = "text-danger";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void Back() => Nav.NavigateTo("/admin/classoffering");
+
+    private sealed class CreateClassOfferingForm
+    {
+        [Required] public string SubjectCode { get; set; } = "";
+        [Required] public string SubjectTitle { get; set; } = "";
+        [Range(0, 30)] public decimal Units { get; set; } = 0m;
+
+        [Required] public string CourseYearSection { get; set; } = "";
+        public ClassType ClassType { get; set; } = ClassType.Lecture;
+
+        [Required] public string? Term { get; set; }
+        [Required] public string? SchoolYear { get; set; }
+
+        public string? Days { get; set; }
+        public string? Time { get; set; }
+    }
+}

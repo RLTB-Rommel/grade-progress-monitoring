@@ -1,0 +1,23 @@
+# .NET build outputs
+bin/
+obj/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# User-specific / secrets
+appsettings.Development.json
+secrets.json
+
+# SQLite local DB (if you use it)
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
