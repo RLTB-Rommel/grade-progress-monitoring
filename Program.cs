@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.IO;
 
 using GradeProgressMonitoring.Components;
 using GradeProgressMonitoring.Components.Account;
@@ -10,9 +11,15 @@ using GradeProgressMonitoring.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// --------------------------------------------------
+// Razor + Blazor
+// --------------------------------------------------
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// --------------------------------------------------
+// Authentication / Identity
+// --------------------------------------------------
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityRedirectManager>();
 builder.Services.AddScoped<AuthenticationStateProvider, IdentityRevalidatingAuthenticationStateProvider>();
@@ -24,14 +31,32 @@ builder.Services.AddAuthentication(options =>
 })
 .AddIdentityCookies();
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+// --------------------------------------------------
+// DATABASE (SQLite – Render/Docker safe)
+// --------------------------------------------------
+// Use persistent disk if provided (Render), otherwise fallback to /app/Data
+var sqliteDir = Environment.GetEnvironmentVariable("SQLITE_DIR");
+
+if (string.IsNullOrWhiteSpace(sqliteDir))
+{
+    sqliteDir = Path.Combine(AppContext.BaseDirectory, "Data");
+}
+
+// Ensure directory exists and is writable
+Directory.CreateDirectory(sqliteDir);
+
+// Absolute DB path
+var sqlitePath = Path.Combine(sqliteDir, "app.db");
+var connectionString = $"Data Source={sqlitePath}";
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlite(connectionString));
 
 builder.Services.AddDatabaseDeveloperPageExceptionFilter();
 
+// --------------------------------------------------
+// Identity configuration
+// --------------------------------------------------
 builder.Services.AddIdentityCore<ApplicationUser>(options =>
 {
     options.SignIn.RequireConfirmedAccount = true;
@@ -42,24 +67,31 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
 .AddSignInManager()
 .AddDefaultTokenProviders();
 
+// --------------------------------------------------
+// App Services
+// --------------------------------------------------
 builder.Services.AddScoped<GradingTemplateService>();
 
-// No real email sender yet (dev)
+// Dev email sender (no-op)
 builder.Services.AddSingleton<IEmailSender<ApplicationUser>, IdentityNoOpEmailSender>();
 
 var app = builder.Build();
 
-// Ensure DB is migrated before seeding roles/users
+// --------------------------------------------------
+// Ensure DB exists + migrations applied
+// --------------------------------------------------
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     await db.Database.MigrateAsync();
 }
 
-// Seed roles + admin user
+// Seed roles and admin user
 await IdentitySeeder.SeedAsync(app.Services);
 
-// Configure the HTTP request pipeline.
+// --------------------------------------------------
+// HTTP Pipeline
+// --------------------------------------------------
 if (app.Environment.IsDevelopment())
 {
     app.UseMigrationsEndPoint();
@@ -72,34 +104,34 @@ else
 
 app.UseStatusCodePagesWithReExecute("/not-found");
 app.UseHttpsRedirection();
-
 app.UseAntiforgery();
 
 app.MapStaticAssets();
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-//
-// Custom Logout Endpoint (avoids /Account/Logout returnUrl issues)
-// Use this endpoint from NavMenu: action="/logout"
-//
+// --------------------------------------------------
+// Custom Logout Endpoint
+// --------------------------------------------------
 app.MapPost("/logout", async (
     HttpContext httpContext,
     [FromForm] string? returnUrl,
     SignInManager<ApplicationUser> signInManager) =>
 {
     await signInManager.SignOutAsync();
-
-    // Only redirect to a local URL
     return Results.LocalRedirect(SanitizeLocalReturnUrl(returnUrl));
 })
-.RequireAuthorization(); // only logged-in users can hit it
+.RequireAuthorization();
 
-// Add additional endpoints required by the Identity /Account Razor components.
+// Identity endpoints
 app.MapAdditionalIdentityEndpoints();
 
 app.Run();
 
+// --------------------------------------------------
+// Helpers
+// --------------------------------------------------
 static string SanitizeLocalReturnUrl(string? returnUrl)
 {
     if (string.IsNullOrWhiteSpace(returnUrl))
@@ -107,19 +139,15 @@ static string SanitizeLocalReturnUrl(string? returnUrl)
 
     returnUrl = returnUrl.Trim();
 
-    // Reject absolute URLs
     if (Uri.TryCreate(returnUrl, UriKind.Absolute, out _))
         return "/";
 
-    // Reject protocol-relative
     if (returnUrl.StartsWith("//", StringComparison.Ordinal))
         return "/";
 
-    // Allow virtual local
     if (returnUrl.StartsWith("~/", StringComparison.Ordinal))
         return returnUrl;
 
-    // Ensure leading slash
     if (!returnUrl.StartsWith("/", StringComparison.Ordinal))
         return "/" + returnUrl;
 
