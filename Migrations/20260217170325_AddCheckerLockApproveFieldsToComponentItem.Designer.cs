@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GradeProgressMonitoring.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260216222149_AddCheckerLockApproveFieldsToComponentItem")]
+    [Migration("20260217170325_AddCheckerLockApproveFieldsToComponentItem")]
     partial class AddCheckerLockApproveFieldsToComponentItem
     {
         /// <inheritdoc />

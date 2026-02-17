@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GradeProgressMonitoring.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260217165025_InitialCreate")]
+    [Migration("20260217170259_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
