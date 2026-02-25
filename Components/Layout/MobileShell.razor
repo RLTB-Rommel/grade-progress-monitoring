@@ -1,0 +1,52 @@
+﻿@rendermode InteractiveServer
+@inherits LayoutComponentBase
+
+<div class="page">
+
+    <!-- Mobile top bar -->
+    <header class="mobile-ribbon">
+        <button type="button" class="ribbon-toggle" @onclick="ToggleNav" aria-label="Open menu">
+            ☰
+        </button>
+        <div class="ribbon-title">Grade Progress Monitoring</div>
+    </header>
+
+    <!-- Off-canvas sidebar -->
+    <aside class="sidebar @(navOpen ? "open" : "")">
+        <NavMenu />
+    </aside>
+
+    <!-- Backdrop only when open -->
+    @if (navOpen)
+    {
+        <div class="backdrop" @onclick="CloseNav" aria-label="Close menu"></div>
+    }
+
+    <!-- Main content -->
+    <main class="main" @onclick="AutoCloseOnMainTap">
+        <div class="content px-4">
+            @Body
+        </div>
+
+        <footer class="app-footer text-center">
+            <div class="container">
+                <div class="footer-line">© 2026 R. Aunario Enterprise</div>
+                <div class="footer-subline">Grade Progress Monitoring System</div>
+            </div>
+        </footer>
+    </main>
+
+</div>
+
+@code {
+    private bool navOpen;
+
+    private void ToggleNav() => navOpen = !navOpen;
+    private void CloseNav() => navOpen = false;
+
+    private void AutoCloseOnMainTap()
+    {
+        if (navOpen)
+            navOpen = false;
+    }
+}

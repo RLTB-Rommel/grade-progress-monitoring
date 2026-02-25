@@ -1,27 +1,38 @@
 ﻿@inherits LayoutComponentBase
 
 <div class="page">
-    <!-- SIDEBAR / NAV -->
-    <div class="sidebar">
-        <NavMenu />
-    </div>
 
-    <!-- MAIN CONTENT -->
-    <main>
+    <!-- Hidden checkbox controls nav -->
+    <input type="checkbox" id="navToggle" class="nav-toggle" />
+
+    <!-- Mobile top bar -->
+    <header class="mobile-ribbon">
+        <label for="navToggle" class="ribbon-toggle" aria-label="Open menu">
+            ☰
+        </label>
+        <div class="ribbon-title">Grade Progress Monitoring</div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <NavMenu />
+    </aside>
+
+    <!-- Backdrop (click closes because it’s a label tied to navToggle) -->
+    <label for="navToggle" class="backdrop"></label>
+
+    <!-- Main content -->
+    <main class="main">
         <div class="content px-4">
             @Body
         </div>
 
-        <!-- GLOBAL FOOTER -->
         <footer class="app-footer text-center">
             <div class="container">
-                <div class="footer-line">
-                    © 2026 R. Aunario Enterprise
-                </div>
-                <div class="footer-subline">
-                    Grade Progress Monitoring System
-                </div>
+                <div class="footer-line">© 2026 R. Aunario Enterprise</div>
+                <div class="footer-subline">Grade Progress Monitoring System</div>
             </div>
         </footer>
     </main>
+
 </div>
