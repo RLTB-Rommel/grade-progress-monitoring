@@ -14,7 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 // --------------------------------------------------
 // Razor Pages + Blazor
 // --------------------------------------------------
-builder.Services.AddRazorPages(); // ✅ Needed for Identity UI Razor Pages
+builder.Services.AddRazorPages(); 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
