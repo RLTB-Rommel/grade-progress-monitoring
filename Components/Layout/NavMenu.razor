@@ -104,9 +104,9 @@
                 </div>
 
                 <div class="nav-item px-3">
-                    <form action="/logout" method="post" @formname="logout-form">
+                    <form action="/logout" method="post" @formname="logout-form" data-enhance-nav="false">
                         <AntiforgeryToken />
-                        <input type="hidden" name="returnUrl" value="@SafeReturnUrl" />
+                        <input type="hidden" name="returnUrl" value="/" />
                         <button type="submit" class="nav-link nav-link-center btn btn-link p-0 w-100">
                             <span class="bi bi-arrow-bar-left-nav-menu"></span>
                             Logout
