@@ -33,48 +33,22 @@ builder.Services.AddAuthentication(options =>
 .AddIdentityCookies();
 
 // --------------------------------------------------
-// DATABASE (Neon Postgres in Render, SQLite fallback locally)
+// DATABASE (Neon Postgres or SQLite fallback)
 // --------------------------------------------------
-var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+var connectionString =
+    builder.Configuration.GetConnectionString("DefaultConnection") ??
+    Environment.GetEnvironmentVariable("DATABASE_URL");
 
-if (!string.IsNullOrWhiteSpace(databaseUrl))
+if (!string.IsNullOrWhiteSpace(connectionString))
 {
-    // Neon provides DATABASE_URL like:
-    // postgresql://USER:PASSWORD@HOST/DB?sslmode=require
-    var uri = new Uri(databaseUrl);
-    var userInfo = uri.UserInfo.Split(':', 2);
-
-    var host = uri.Host;
-    var port = uri.Port > 0 ? uri.Port : 5432;
-    var username = userInfo[0];
-    var password = userInfo.Length > 1 ? userInfo[1] : "";
-    var database = uri.AbsolutePath.Trim('/');
-
-    // Build an Npgsql connection string (Neon needs SSL/TLS)
-    var npgsqlConn =
-        $"Host={host};Port={port};Database={database};Username={username};Password={password};" +
-        $"SSL Mode=Require;Trust Server Certificate=true;Pooling=true;";
-
     builder.Services.AddDbContext<ApplicationDbContext>(options =>
-        options.UseNpgsql(npgsqlConn));
+        options.UseNpgsql(connectionString));
 }
 else
 {
-    // Fallback: local SQLite for dev (optional)
-    var sqliteDir = Environment.GetEnvironmentVariable("SQLITE_DIR");
-
-    if (string.IsNullOrWhiteSpace(sqliteDir))
-    {
-        sqliteDir = Path.Combine(AppContext.BaseDirectory, "Data");
-    }
-
-    Directory.CreateDirectory(sqliteDir);
-
-    var sqlitePath = Path.Combine(sqliteDir, "app.db");
-    var sqliteConn = $"Data Source={sqlitePath}";
-
+    var sqlitePath = Path.Combine(AppContext.BaseDirectory, "app.db");
     builder.Services.AddDbContext<ApplicationDbContext>(options =>
-        options.UseSqlite(sqliteConn));
+        options.UseSqlite($"Data Source={sqlitePath}"));
 }
 
 builder.Services.AddDatabaseDeveloperPageExceptionFilter();
