@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.IO;
 
 using GradeProgressMonitoring.Components;
@@ -14,7 +15,7 @@ var builder = WebApplication.CreateBuilder(args);
 // --------------------------------------------------
 // Razor Pages + Blazor
 // --------------------------------------------------
-builder.Services.AddRazorPages(); 
+builder.Services.AddRazorPages();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
@@ -35,7 +36,7 @@ builder.Services.AddAuthentication(options =>
 // --------------------------------------------------
 // DATABASE
 //   - Render/Neon: DATABASE_URL (postgresql://...)
-//   - Local dev: SQLite in /Data/app.db (unless you set a real Postgres conn string)
+//   - Local dev: SQLite in /Data/app.db
 // --------------------------------------------------
 
 static bool LooksLikePostgres(string s)
@@ -68,7 +69,6 @@ static string BuildNpgsqlFromDatabaseUrl(string databaseUrl)
     var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
     var sslMode = query.TryGetValue("sslmode", out var ssl) ? ssl.ToString() : "Require";
 
-    // Neon often needs SSL; keep Trust Server Certificate to avoid cert chain issues
     return
         $"Host={uri.Host};Port={(uri.Port > 0 ? uri.Port : 5432)};" +
         $"Database={database};Username={username};Password={password};" +
@@ -93,12 +93,17 @@ else if (!string.IsNullOrWhiteSpace(configConn) && LooksLikePostgres(configConn)
 if (!string.IsNullOrWhiteSpace(postgresConn))
 {
     builder.Services.AddDbContext<ApplicationDbContext>(options =>
-        options.UseNpgsql(postgresConn));
+        options.UseNpgsql(postgresConn)
+    // ✅ Optional: log warnings instead of crashing if you want
+    // .ConfigureWarnings(w => w.Log(RelationalEventId.PendingModelChangesWarning))
+    );
 }
 else
 {
     // Local SQLite fallback
-    var sqliteDir = Path.Combine(AppContext.BaseDirectory, "Data");
+    // IMPORTANT NOTE:
+    // This writes to bin/.../Data/app.db (AppContext.BaseDirectory), not your project root.
+    var sqliteDir = Path.Combine(builder.Environment.ContentRootPath, "Data");
     Directory.CreateDirectory(sqliteDir);
 
     var sqlitePath = Path.Combine(sqliteDir, "app.db");
@@ -134,16 +139,12 @@ builder.Services.AddSingleton<IEmailSender<ApplicationUser>, IdentityNoOpEmailSe
 var app = builder.Build();
 
 // --------------------------------------------------
-// Ensure DB exists + migrations applied
+// Ensure DB exists + migrations applied (SAFE on Render)
 // --------------------------------------------------
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    await db.Database.MigrateAsync();
-}
+await TryMigrateDbAsync(app);
 
-// Seed roles and admin user
-await IdentitySeeder.SeedAsync(app.Services);
+// Seed roles and admin user (SAFE too)
+await TrySeedIdentityAsync(app);
 
 // --------------------------------------------------
 // HTTP Pipeline
@@ -164,15 +165,12 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
 
-// ✅ Required for Identity endpoints + RequireAuthorization()
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.UseAntiforgery();
 
 app.MapStaticAssets();
-
-// ✅ Identity UI Razor Pages support (safe even if you use endpoint-based Identity)
 app.MapRazorPages();
 
 // --------------------------------------------------
@@ -188,10 +186,8 @@ app.MapPost("/logout", async (
 })
 .RequireAuthorization();
 
-// ✅ Identity endpoints (/Account/Login, /Account/Register, etc.)
 app.MapAdditionalIdentityEndpoints();
 
-// ✅ Blazor app fallback LAST
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
@@ -207,21 +203,75 @@ static string SanitizeLocalReturnUrl(string? returnUrl)
 
     returnUrl = returnUrl.Trim();
 
-    // Block absolute URLs
     if (Uri.TryCreate(returnUrl, UriKind.Absolute, out _))
         return "/";
 
-    // Block protocol-relative URLs
     if (returnUrl.StartsWith("//", StringComparison.Ordinal))
         return "/";
 
-    // Allow app-relative "~/" routes
     if (returnUrl.StartsWith("~/", StringComparison.Ordinal))
         return returnUrl;
 
-    // Ensure it begins with "/"
     if (!returnUrl.StartsWith("/", StringComparison.Ordinal))
         return "/" + returnUrl;
 
     return returnUrl;
+}
+
+static async Task TryMigrateDbAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>()
+                                     .CreateLogger("StartupMigrations");
+
+    var env = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
+
+    // Retry helps Render/Neon where DB might not be ready yet
+    const int maxAttempts = 5;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++)
+    {
+        try
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            await db.Database.MigrateAsync();
+
+            logger.LogInformation("Database migration completed.");
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Database migration failed (attempt {Attempt}/{Max}).", attempt, maxAttempts);
+
+            // ✅ Don’t crash production container
+            if (!env.IsDevelopment())
+            {
+                // Wait then retry
+                await Task.Delay(TimeSpan.FromSeconds(3 * attempt));
+                continue;
+            }
+
+            // In development, failing fast is OK
+            throw;
+        }
+    }
+
+    logger.LogWarning("Database migration could not be completed after retries. App will continue running.");
+}
+
+static async Task TrySeedIdentityAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>()
+                                     .CreateLogger("StartupSeeder");
+
+    try
+    {
+        await IdentitySeeder.SeedAsync(app.Services);
+        logger.LogInformation("Identity seeding completed.");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Identity seeding failed.");
+        // ✅ Don’t crash production container
+    }
 }
