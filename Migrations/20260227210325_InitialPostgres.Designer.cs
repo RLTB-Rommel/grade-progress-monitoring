@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace GradeProgressMonitoring.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260227200917_Render_Sync_20260228")]
-    partial class Render_Sync_20260228
+    [Migration("20260227210325_InitialPostgres")]
+    partial class InitialPostgres
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

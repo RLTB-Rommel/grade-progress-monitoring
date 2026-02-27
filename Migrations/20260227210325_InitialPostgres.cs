@@ -1,5 +1,6 @@
 ﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
@@ -15,10 +16,10 @@ namespace GradeProgressMonitoring.Migrations
                 name: "AspNetRoles",
                 columns: table => new
                 {
-                    Id = table.Column<string>(type: "TEXT", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    NormalizedName = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    ConcurrencyStamp = table.Column<string>(type: "TEXT", nullable: true)
+                    Id = table.Column<string>(type: "text", nullable: false),
+                    Name = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
+                    NormalizedName = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
+                    ConcurrencyStamp = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -29,17 +30,17 @@ namespace GradeProgressMonitoring.Migrations
                 name: "ClassOfferings",
                 columns: table => new
                 {
-                    ClassOfferingId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    SubjectCode = table.Column<string>(type: "TEXT", nullable: false),
-                    SubjectTitle = table.Column<string>(type: "TEXT", nullable: false),
-                    Units = table.Column<decimal>(type: "TEXT", precision: 5, scale: 2, nullable: false),
-                    CourseYearSection = table.Column<string>(type: "TEXT", nullable: false),
-                    ClassType = table.Column<int>(type: "INTEGER", nullable: false),
-                    Term = table.Column<string>(type: "TEXT", nullable: false),
-                    SchoolYear = table.Column<string>(type: "TEXT", nullable: false),
-                    Days = table.Column<string>(type: "TEXT", nullable: true),
-                    Time = table.Column<string>(type: "TEXT", nullable: true)
+                    ClassOfferingId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    SubjectCode = table.Column<string>(type: "text", nullable: false),
+                    SubjectTitle = table.Column<string>(type: "text", nullable: false),
+                    Units = table.Column<decimal>(type: "numeric(5,2)", precision: 5, scale: 2, nullable: false),
+                    CourseYearSection = table.Column<string>(type: "text", nullable: false),
+                    ClassType = table.Column<int>(type: "integer", nullable: false),
+                    Term = table.Column<string>(type: "text", nullable: false),
+                    SchoolYear = table.Column<string>(type: "text", nullable: false),
+                    Days = table.Column<string>(type: "text", nullable: true),
+                    Time = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -50,12 +51,12 @@ namespace GradeProgressMonitoring.Migrations
                 name: "StudentProfiles",
                 columns: table => new
                 {
-                    StudentProfileId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    StudentNo = table.Column<string>(type: "TEXT", maxLength: 30, nullable: true),
-                    FullName = table.Column<string>(type: "TEXT", maxLength: 150, nullable: false),
-                    Program = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true),
-                    YearLevel = table.Column<string>(type: "TEXT", maxLength: 20, nullable: true)
+                    StudentProfileId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    StudentNo = table.Column<string>(type: "character varying(30)", maxLength: 30, nullable: true),
+                    FullName = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
+                    Program = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true),
+                    YearLevel = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -66,14 +67,14 @@ namespace GradeProgressMonitoring.Migrations
                 name: "SubjectCatalogs",
                 columns: table => new
                 {
-                    SubjectCatalogId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    SubjectCode = table.Column<string>(type: "TEXT", maxLength: 30, nullable: false),
-                    SubjectTitle = table.Column<string>(type: "TEXT", maxLength: 200, nullable: false),
-                    Units = table.Column<decimal>(type: "TEXT", nullable: false),
-                    Program = table.Column<string>(type: "TEXT", maxLength: 80, nullable: true),
-                    YearLevel = table.Column<string>(type: "TEXT", maxLength: 20, nullable: true),
-                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false)
+                    SubjectCatalogId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    SubjectCode = table.Column<string>(type: "character varying(30)", maxLength: 30, nullable: false),
+                    SubjectTitle = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    Units = table.Column<decimal>(type: "numeric", nullable: false),
+                    Program = table.Column<string>(type: "character varying(80)", maxLength: 80, nullable: true),
+                    YearLevel = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: true),
+                    IsActive = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -84,11 +85,11 @@ namespace GradeProgressMonitoring.Migrations
                 name: "AspNetRoleClaims",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    RoleId = table.Column<string>(type: "TEXT", nullable: false),
-                    ClaimType = table.Column<string>(type: "TEXT", nullable: true),
-                    ClaimValue = table.Column<string>(type: "TEXT", nullable: true)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    RoleId = table.Column<string>(type: "text", nullable: false),
+                    ClaimType = table.Column<string>(type: "text", nullable: true),
+                    ClaimValue = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -105,12 +106,12 @@ namespace GradeProgressMonitoring.Migrations
                 name: "GradingComponents",
                 columns: table => new
                 {
-                    GradingComponentId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    ClassOfferingId = table.Column<int>(type: "INTEGER", nullable: false),
-                    ComponentType = table.Column<int>(type: "INTEGER", nullable: false),
-                    IsEnabled = table.Column<bool>(type: "INTEGER", nullable: false),
-                    WeightPercent = table.Column<decimal>(type: "TEXT", precision: 5, scale: 2, nullable: false)
+                    GradingComponentId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    ClassOfferingId = table.Column<int>(type: "integer", nullable: false),
+                    ComponentType = table.Column<int>(type: "integer", nullable: false),
+                    IsEnabled = table.Column<bool>(type: "boolean", nullable: false),
+                    WeightPercent = table.Column<decimal>(type: "numeric(5,2)", precision: 5, scale: 2, nullable: false)
                 },
                 constraints: table =>
                 {
@@ -127,22 +128,22 @@ namespace GradeProgressMonitoring.Migrations
                 name: "AspNetUsers",
                 columns: table => new
                 {
-                    Id = table.Column<string>(type: "TEXT", nullable: false),
-                    StudentProfileId = table.Column<int>(type: "INTEGER", nullable: true),
-                    UserName = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    NormalizedUserName = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    Email = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    NormalizedEmail = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    EmailConfirmed = table.Column<bool>(type: "INTEGER", nullable: false),
-                    PasswordHash = table.Column<string>(type: "TEXT", nullable: true),
-                    SecurityStamp = table.Column<string>(type: "TEXT", nullable: true),
-                    ConcurrencyStamp = table.Column<string>(type: "TEXT", nullable: true),
-                    PhoneNumber = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    PhoneNumberConfirmed = table.Column<bool>(type: "INTEGER", nullable: false),
-                    TwoFactorEnabled = table.Column<bool>(type: "INTEGER", nullable: false),
-                    LockoutEnd = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    LockoutEnabled = table.Column<bool>(type: "INTEGER", nullable: false),
-                    AccessFailedCount = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<string>(type: "text", nullable: false),
+                    StudentProfileId = table.Column<int>(type: "integer", nullable: true),
+                    UserName = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
+                    NormalizedUserName = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
+                    Email = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
+                    NormalizedEmail = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
+                    EmailConfirmed = table.Column<bool>(type: "boolean", nullable: false),
+                    PasswordHash = table.Column<string>(type: "text", nullable: true),
+                    SecurityStamp = table.Column<string>(type: "text", nullable: true),
+                    ConcurrencyStamp = table.Column<string>(type: "text", nullable: true),
+                    PhoneNumber = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
+                    PhoneNumberConfirmed = table.Column<bool>(type: "boolean", nullable: false),
+                    TwoFactorEnabled = table.Column<bool>(type: "boolean", nullable: false),
+                    LockoutEnd = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    LockoutEnabled = table.Column<bool>(type: "boolean", nullable: false),
+                    AccessFailedCount = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -159,17 +160,17 @@ namespace GradeProgressMonitoring.Migrations
                 name: "ComponentItems",
                 columns: table => new
                 {
-                    ComponentItemId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    GradingComponentId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Label = table.Column<string>(type: "TEXT", maxLength: 150, nullable: false),
-                    OrderNo = table.Column<int>(type: "INTEGER", nullable: false),
-                    MaxScore = table.Column<decimal>(type: "TEXT", nullable: false),
-                    IsOpenForEncoding = table.Column<bool>(type: "INTEGER", nullable: false),
-                    IsLocked = table.Column<bool>(type: "INTEGER", nullable: false),
-                    IsApproved = table.Column<bool>(type: "INTEGER", nullable: false),
-                    ApprovedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    ApprovedByUserId = table.Column<string>(type: "TEXT", nullable: true)
+                    ComponentItemId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    GradingComponentId = table.Column<int>(type: "integer", nullable: false),
+                    Label = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
+                    OrderNo = table.Column<int>(type: "integer", nullable: false),
+                    MaxScore = table.Column<decimal>(type: "numeric", nullable: false),
+                    IsOpenForEncoding = table.Column<bool>(type: "boolean", nullable: false),
+                    IsLocked = table.Column<bool>(type: "boolean", nullable: false),
+                    IsApproved = table.Column<bool>(type: "boolean", nullable: false),
+                    ApprovedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    ApprovedByUserId = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -186,11 +187,11 @@ namespace GradeProgressMonitoring.Migrations
                 name: "LabRubricCriteria",
                 columns: table => new
                 {
-                    LabRubricCriterionId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    GradingComponentId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 120, nullable: false),
-                    WeightPercent = table.Column<decimal>(type: "TEXT", precision: 5, scale: 2, nullable: false)
+                    LabRubricCriterionId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    GradingComponentId = table.Column<int>(type: "integer", nullable: false),
+                    Name = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
+                    WeightPercent = table.Column<decimal>(type: "numeric(5,2)", precision: 5, scale: 2, nullable: false)
                 },
                 constraints: table =>
                 {
@@ -207,11 +208,11 @@ namespace GradeProgressMonitoring.Migrations
                 name: "AspNetUserClaims",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<string>(type: "TEXT", nullable: false),
-                    ClaimType = table.Column<string>(type: "TEXT", nullable: true),
-                    ClaimValue = table.Column<string>(type: "TEXT", nullable: true)
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<string>(type: "text", nullable: false),
+                    ClaimType = table.Column<string>(type: "text", nullable: true),
+                    ClaimValue = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -228,10 +229,10 @@ namespace GradeProgressMonitoring.Migrations
                 name: "AspNetUserLogins",
                 columns: table => new
                 {
-                    LoginProvider = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
-                    ProviderKey = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
-                    ProviderDisplayName = table.Column<string>(type: "TEXT", nullable: true),
-                    UserId = table.Column<string>(type: "TEXT", nullable: false)
+                    LoginProvider = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
+                    ProviderKey = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
+                    ProviderDisplayName = table.Column<string>(type: "text", nullable: true),
+                    UserId = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -248,8 +249,8 @@ namespace GradeProgressMonitoring.Migrations
                 name: "AspNetUserRoles",
                 columns: table => new
                 {
-                    UserId = table.Column<string>(type: "TEXT", nullable: false),
-                    RoleId = table.Column<string>(type: "TEXT", nullable: false)
+                    UserId = table.Column<string>(type: "text", nullable: false),
+                    RoleId = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -272,10 +273,10 @@ namespace GradeProgressMonitoring.Migrations
                 name: "AspNetUserTokens",
                 columns: table => new
                 {
-                    UserId = table.Column<string>(type: "TEXT", nullable: false),
-                    LoginProvider = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
-                    Value = table.Column<string>(type: "TEXT", nullable: true)
+                    UserId = table.Column<string>(type: "text", nullable: false),
+                    LoginProvider = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
+                    Name = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
+                    Value = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -292,14 +293,14 @@ namespace GradeProgressMonitoring.Migrations
                 name: "Enrollments",
                 columns: table => new
                 {
-                    EnrollmentId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    ClassOfferingId = table.Column<int>(type: "INTEGER", nullable: false),
-                    StudentProfileId = table.Column<int>(type: "INTEGER", nullable: true),
-                    StudentUserId = table.Column<string>(type: "TEXT", nullable: true),
-                    StudentNo = table.Column<string>(type: "TEXT", maxLength: 30, nullable: false),
-                    StudentName = table.Column<string>(type: "TEXT", maxLength: 150, nullable: false),
-                    Section = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true)
+                    EnrollmentId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    ClassOfferingId = table.Column<int>(type: "integer", nullable: false),
+                    StudentProfileId = table.Column<int>(type: "integer", nullable: true),
+                    StudentUserId = table.Column<string>(type: "text", nullable: true),
+                    StudentNo = table.Column<string>(type: "character varying(30)", maxLength: 30, nullable: false),
+                    StudentName = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
+                    Section = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -328,14 +329,14 @@ namespace GradeProgressMonitoring.Migrations
                 name: "LabActivitySubmissions",
                 columns: table => new
                 {
-                    LabActivitySubmissionId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    ComponentItemId = table.Column<int>(type: "INTEGER", nullable: false),
-                    StudentUserId = table.Column<string>(type: "TEXT", nullable: false),
-                    DaysLate = table.Column<int>(type: "INTEGER", nullable: false),
-                    IsPlagiarized = table.Column<bool>(type: "INTEGER", nullable: false),
-                    EncodedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: true)
+                    LabActivitySubmissionId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    ComponentItemId = table.Column<int>(type: "integer", nullable: false),
+                    StudentUserId = table.Column<string>(type: "text", nullable: false),
+                    DaysLate = table.Column<int>(type: "integer", nullable: false),
+                    IsPlagiarized = table.Column<bool>(type: "boolean", nullable: false),
+                    EncodedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -352,14 +353,14 @@ namespace GradeProgressMonitoring.Migrations
                 name: "ScoreEntries",
                 columns: table => new
                 {
-                    ScoreEntryId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    ComponentItemId = table.Column<int>(type: "INTEGER", nullable: false),
-                    StudentUserId = table.Column<string>(type: "TEXT", nullable: false),
-                    Score = table.Column<decimal>(type: "TEXT", nullable: true),
-                    EncodedByUserId = table.Column<string>(type: "TEXT", nullable: true),
-                    EncodedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: true)
+                    ScoreEntryId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    ComponentItemId = table.Column<int>(type: "integer", nullable: false),
+                    StudentUserId = table.Column<string>(type: "text", nullable: false),
+                    Score = table.Column<decimal>(type: "numeric", nullable: true),
+                    EncodedByUserId = table.Column<string>(type: "text", nullable: true),
+                    EncodedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -382,17 +383,17 @@ namespace GradeProgressMonitoring.Migrations
                 name: "LabRubricScores",
                 columns: table => new
                 {
-                    LabRubricScoreId = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    LabActivitySubmissionId = table.Column<int>(type: "INTEGER", nullable: false),
-                    CriterionName = table.Column<string>(type: "TEXT", maxLength: 120, nullable: false),
-                    Score = table.Column<decimal>(type: "TEXT", nullable: false)
+                    LabRubricScoreId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    LabActivitySubmissionId = table.Column<int>(type: "integer", nullable: false),
+                    CriterionName = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
+                    Score = table.Column<decimal>(type: "numeric", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_LabRubricScores", x => x.LabRubricScoreId);
                     table.ForeignKey(
-                        name: "FK_LabRubricScores_LabActivitySubmissions_LabActivitySubmissionId",
+                        name: "FK_LabRubricScores_LabActivitySubmissions_LabActivitySubmissio~",
                         column: x => x.LabActivitySubmissionId,
                         principalTable: "LabActivitySubmissions",
                         principalColumn: "LabActivitySubmissionId",
@@ -442,7 +443,7 @@ namespace GradeProgressMonitoring.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_ClassOfferings_SubjectCode_Term_SchoolYear_CourseYearSection_ClassType",
+                name: "IX_ClassOfferings_SubjectCode_Term_SchoolYear_CourseYearSectio~",
                 table: "ClassOfferings",
                 columns: new[] { "SubjectCode", "Term", "SchoolYear", "CourseYearSection", "ClassType" },
                 unique: true);
