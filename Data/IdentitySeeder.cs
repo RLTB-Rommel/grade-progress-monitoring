@@ -19,8 +19,10 @@ public static class IdentitySeeder
                 await roleManager.CreateAsync(new IdentityRole(r));
         }
 
-        var adminEmail = "admin@gradeprogress.local";
-        var adminPassword = "Admin123!";
+        var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL")
+                 ?? "admin@gradeprogress.local";
+        var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD")
+                    ?? "Admin123!";
 
         var adminUser = await userManager.FindByEmailAsync(adminEmail);
         if (adminUser is null)
