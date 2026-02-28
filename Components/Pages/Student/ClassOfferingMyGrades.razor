@@ -313,6 +313,7 @@ else
     /// - Overall standing is weighted over 100% always (no renormalization).
     /// - Missing/ungraded components contribute 0.
     /// - Quizzes apply "Consideration Quiz replaces the lowest" per period (Prelim/Midterm/Finals).
+    /// - Major Exams apply internal weighting: 1/4 prelim, 1/4 midterm, 1/2 finals.
     /// </summary>
     private void RecomputeTotals()
     {
@@ -339,14 +340,13 @@ else
         {
             decimal? compPercent;
 
-            // Special handling for Quizzes: consideration replaces lowest per period
+            // ✅ Quizzes: consideration replaces lowest (even if only one base quiz exists so far)
             if (g.Key.ComponentType == ComponentType.Quizzes)
             {
                 var quizResult = ComputeQuizzesPercentWithReplacement(g.ToList(), whatIfEnabled);
-
                 compPercent = quizResult.Percent;
 
-                // display totals: only include items that have a score (actual/what-if) in the chosen effective set
+                // display totals: count only rows that were chosen and have scores
                 foreach (var chosen in quizResult.ChosenRows)
                 {
                     var sc = GetEffectiveScore(chosen, whatIfEnabled);
@@ -356,11 +356,25 @@ else
                     p += chosen.MaxScore;
                 }
             }
+            // ✅ Major Exams (Lecture): 25/25/50 internal weighting
+            else if (g.Key.ComponentType == ComponentType.MajorOrPractical
+                     && g.Key.ComponentName.Contains("Major", StringComparison.OrdinalIgnoreCase))
+            {
+                compPercent = ComputeMajorExamPercent25_25_50(g, whatIfEnabled);
+
+                // display totals: only count scored/what-if rows
+                foreach (var r in g)
+                {
+                    var sc = GetEffectiveScore(r, whatIfEnabled);
+                    if (!sc.HasValue) continue;
+
+                    e += Clamp(sc.Value, 0, r.MaxScore);
+                    p += r.MaxScore;
+                }
+            }
             else
             {
-                // Normal components:
-                // - Comp percent uses scored items only (so it can show progress),
-                //   BUT overall standing still treats missing components as 0 because we don't renormalize.
+                // Normal components: progress percent (scored-only), but overall standing remains conservative
                 decimal compEarned = 0m;
                 decimal compPossible = 0m;
 
@@ -417,7 +431,9 @@ else
     {
         if (label.StartsWith("Prelim", StringComparison.OrdinalIgnoreCase)) return QuizPeriod.Prelim;
         if (label.StartsWith("Midterm", StringComparison.OrdinalIgnoreCase)) return QuizPeriod.Midterm;
-        if (label.StartsWith("Finals", StringComparison.OrdinalIgnoreCase)) return QuizPeriod.Finals;
+        if (label.StartsWith("Final", StringComparison.OrdinalIgnoreCase) || label.StartsWith("Finals", StringComparison.OrdinalIgnoreCase))
+            return QuizPeriod.Finals;
+
         return QuizPeriod.Unknown;
     }
 
@@ -442,14 +458,6 @@ else
         public List<GradeRow> ChosenRows { get; set; } = new();
     }
 
-    /// <summary>
-    /// Computes quiz percent (0..100) with consideration replacement:
-    /// For each period, base is Short + Long. Consideration may replace the lower of those two.
-    /// Conservative handling:
-    /// - If only one of Short/Long has a score so far, we compute percent using only what is scored (progress view).
-    /// - If neither has a score and only consideration has a score, we show percent based on that one (progress view).
-    /// This percent affects contribution; ungraded quiz component still contributes 0 overall.
-    /// </summary>
     private static QuizComputeResult ComputeQuizzesPercentWithReplacement(
         List<GradeRow> quizRows,
         bool whatIfEnabled)
@@ -467,57 +475,61 @@ else
             var longRow = pg.FirstOrDefault(r => GetQuizKind(r.ItemLabel) == QuizKind.Long);
             var consRow = pg.FirstOrDefault(r => GetQuizKind(r.ItemLabel) == QuizKind.Consideration);
 
-            // gather scored base candidates
-            var baseList = new List<(GradeRow row, decimal pct)>();
+            decimal? shortScore = shortRow is null ? null : GetEffectiveScore(shortRow, whatIfEnabled);
+            decimal? longScore = longRow is null ? null : GetEffectiveScore(longRow, whatIfEnabled);
+            decimal? consScore = consRow is null ? null : GetEffectiveScore(consRow, whatIfEnabled);
 
-            if (shortRow is not null)
+            decimal? shortPct = (shortRow is not null && shortScore.HasValue && shortRow.MaxScore > 0m)
+                ? shortScore.Value / shortRow.MaxScore
+                : null;
+
+            decimal? longPct = (longRow is not null && longScore.HasValue && longRow.MaxScore > 0m)
+                ? longScore.Value / longRow.MaxScore
+                : null;
+
+            decimal? consPct = (consRow is not null && consScore.HasValue && consRow.MaxScore > 0m)
+                ? consScore.Value / consRow.MaxScore
+                : null;
+
+            if (shortPct is null && longPct is null && consPct is null)
+                continue;
+
+            var slotRows = new List<(GradeRow row, decimal pct)>();
+
+            if (shortPct.HasValue && shortRow is not null)
+                slotRows.Add((shortRow, shortPct.Value));
+
+            if (longPct.HasValue && longRow is not null)
+                slotRows.Add((longRow, longPct.Value));
+
+            // ✅ Replacement logic
+            if (consPct.HasValue)
             {
-                var s = GetEffectiveScore(shortRow, whatIfEnabled);
-                if (s.HasValue && shortRow.MaxScore > 0m)
-                    baseList.Add((shortRow, s.Value / shortRow.MaxScore));
-            }
-
-            if (longRow is not null)
-            {
-                var l = GetEffectiveScore(longRow, whatIfEnabled);
-                if (l.HasValue && longRow.MaxScore > 0m)
-                    baseList.Add((longRow, l.Value / longRow.MaxScore));
-            }
-
-            decimal? consPct = null;
-            if (consRow is not null)
-            {
-                var c = GetEffectiveScore(consRow, whatIfEnabled);
-                if (c.HasValue && consRow.MaxScore > 0m)
-                    consPct = c.Value / consRow.MaxScore;
-            }
-
-            // If no scores at all this period, skip it
-            if (baseList.Count == 0 && consPct is null) continue;
-
-            // If we have 2 base scores (short+long), allow consideration to replace the lower
-            if (baseList.Count >= 2 && consPct.HasValue)
-            {
-                var idxLow = baseList[0].pct <= baseList[1].pct ? 0 : 1;
-                if (consPct.Value > baseList[idxLow].pct)
+                if (slotRows.Count >= 2)
                 {
-                    // replace the lower quiz's pct, keeping that quiz's MaxScore
-                    baseList[idxLow] = (baseList[idxLow].row, consPct.Value);
+                    var idxLow = slotRows[0].pct <= slotRows[1].pct ? 0 : 1;
+                    if (consPct.Value > slotRows[idxLow].pct)
+                    {
+                        slotRows[idxLow] = (slotRows[idxLow].row, consPct.Value);
+                    }
+                }
+                else if (slotRows.Count == 1)
+                {
+                    // ✅ Only one base quiz exists so far: replace it if consideration is higher
+                    if (consPct.Value > slotRows[0].pct)
+                    {
+                        slotRows[0] = (slotRows[0].row, consPct.Value);
+                    }
+                }
+                else
+                {
+                    // No short/long yet but consideration exists
+                    if (consRow is not null)
+                        slotRows.Add((consRow, consPct.Value));
                 }
             }
-            else if (baseList.Count == 1 && consPct.HasValue && consRow is not null)
-            {
-                // progress: let consideration act as an additional improvement signal
-                // (it won't create extra "3 quizzes"; it's only for progress view)
-                baseList.Add((consRow, consPct.Value));
-            }
-            else if (baseList.Count == 0 && consPct.HasValue && consRow is not null)
-            {
-                baseList.Add((consRow, consPct.Value));
-            }
 
-            // accumulate chosen rows (for display totals)
-            foreach (var (row, pct) in baseList)
+            foreach (var (row, pct) in slotRows)
             {
                 chosen.Add(row);
                 earned += pct * row.MaxScore;
@@ -532,6 +544,51 @@ else
             Percent = percent,
             ChosenRows = chosen
         };
+    }
+
+    // -----------------------
+    // Major Exams: 25/25/50 internal rule
+    // -----------------------
+    private static bool IsPrelim(string label) => label.StartsWith("Prelim", StringComparison.OrdinalIgnoreCase);
+    private static bool IsMidterm(string label) => label.StartsWith("Midterm", StringComparison.OrdinalIgnoreCase);
+    private static bool IsFinals(string label) =>
+        label.StartsWith("Final", StringComparison.OrdinalIgnoreCase) ||
+        label.StartsWith("Finals", StringComparison.OrdinalIgnoreCase);
+
+    private static decimal GetMajorExamFactor(string label)
+    {
+        if (IsPrelim(label)) return 0.25m;
+        if (IsMidterm(label)) return 0.25m;
+        if (IsFinals(label)) return 0.50m;
+        return 0m;
+    }
+
+    private static decimal? ComputeMajorExamPercent25_25_50(IEnumerable<GradeRow> examRows, bool whatIfEnabled)
+    {
+        decimal weightedPctSum = 0m;
+        bool anyRecognized = false;
+
+        foreach (var r in examRows)
+        {
+            var factor = GetMajorExamFactor(r.ItemLabel);
+            if (factor <= 0m) continue;
+
+            anyRecognized = true;
+
+            var sc = GetEffectiveScore(r, whatIfEnabled);
+            if (!sc.HasValue || r.MaxScore <= 0m)
+            {
+                // missing => 0 for this part
+                continue;
+            }
+
+            var pct = Clamp(sc.Value, 0, r.MaxScore) / r.MaxScore; // 0..1
+            weightedPctSum += pct * factor;
+        }
+
+        if (!anyRecognized) return null;
+
+        return weightedPctSum * 100m; // 0..100
     }
 
     // -----------------------
