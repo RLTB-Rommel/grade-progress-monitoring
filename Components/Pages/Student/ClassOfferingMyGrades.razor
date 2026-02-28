@@ -4,6 +4,7 @@
 @using System.Security.Claims
 @using GradeProgressMonitoring.Data
 @using GradeProgressMonitoring.Models
+@using GradeProgressMonitoring.Services
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Authorization
@@ -54,7 +55,7 @@ else
         </button>
     </div>
 
-    <div style="display:grid; grid-template-columns: 1fr 320px; gap:16px; align-items:start;">
+    <div style="display:grid; grid-template-columns: 1fr 360px; gap:16px; align-items:start;">
         <div>
             <table class="table table-sm">
                 <thead>
@@ -105,7 +106,7 @@ else
 
             @if (rows.Count == 0)
             {
-                <p class="text-muted">No graded items found yet.</p>
+                <p class="text-muted">No items found.</p>
             }
         </div>
 
@@ -114,19 +115,19 @@ else
                 <h5 style="margin-top:0;">Summary</h5>
 
                 <div style="display:flex; justify-content:space-between;">
-                    <span>Total earned</span>
+                    <span>Total earned (graded/what-if items)</span>
                     <b>@earned.ToString("0.##")</b>
                 </div>
 
                 <div style="display:flex; justify-content:space-between;">
-                    <span>Total possible</span>
+                    <span>Total possible (graded/what-if items)</span>
                     <b>@possible.ToString("0.##")</b>
                 </div>
 
                 <hr />
 
                 <div style="display:flex; justify-content:space-between;">
-                    <span>Total percentage</span>
+                    <span>Weighted standing</span>
                     <b>@totalPercent.ToString("0.##")%</b>
                 </div>
 
@@ -134,6 +135,11 @@ else
                     <span>Grade equivalent</span>
                     <b>@gradeEquivalent</b>
                 </div>
+
+                <p class="text-muted" style="margin:10px 0 0 0; font-size:0.85rem;">
+                    Grades reflect <b>current standing</b>. Ungraded components are treated as <b>0</b> until completed
+                    (e.g., if Major Exam is not yet taken, your standing can appear failing).
+                </p>
 
                 @if (whatIfEnabled)
                 {
@@ -144,6 +150,43 @@ else
                         </p>
                     </div>
                 }
+
+                <hr />
+
+                <h6>Component Breakdown (Weighted)</h6>
+                <table class="table table-sm" style="margin-bottom:0;">
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th style="width:80px;">Weight</th>
+                            <th style="width:110px;">Current %</th>
+                            <th style="width:110px;">Contribution</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in componentSummaries.OrderBy(x => x.OrderNo))
+                        {
+                            <tr>
+                                <td>@c.Name</td>
+                                <td>@c.WeightPercent.ToString("0.##")%</td>
+                                <td>
+                                    @if (c.CurrentPercent is null)
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                    else
+                                    {
+                                        <span>@c.CurrentPercent.Value.ToString("0.##")%</span>
+                                    }
+                                </td>
+                                <td>
+                                    <span>@c.Contribution.ToString("0.##")</span>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
             </div>
         </div>
     </div>
@@ -160,12 +203,16 @@ else
     private Enrollment? myEnrollment;
     private string displaySection = "TBD";
 
+    // For display totals (only graded/what-if items)
     private decimal earned = 0m;
     private decimal possible = 0m;
+
+    // Conservative weighted standing (missing components treated as 0)
     private decimal totalPercent = 0m;
     private string gradeEquivalent = "—";
 
     private readonly List<GradeRow> rows = new();
+    private List<ComponentSummary> componentSummaries = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -238,9 +285,15 @@ else
 
             rows.Add(new GradeRow
             {
-                ComponentName = comp.ComponentType.ToString(),
+                GradingComponentId = comp.GradingComponentId,
+                ComponentType = comp.ComponentType,
+                ComponentOrder = (int)comp.ComponentType, // stable-ish ordering; can refine if needed
+                ComponentName = GetComponentDisplayName(comp.ComponentType),
+                ComponentWeightPercent = comp.WeightPercent,
+
                 ItemLabel = item.Label,
                 MaxScore = item.MaxScore,
+
                 ActualScore = entry?.Score,
                 WhatIfScore = null
             });
@@ -249,33 +302,241 @@ else
         loading = false;
     }
 
+    private string GetComponentDisplayName(ComponentType t)
+    {
+        if (offering is null) return t.ToString();
+        return GradingTemplateService.GetComponentDisplayName(t, offering.ClassType);
+    }
+
+    /// <summary>
+    /// Conservative policy:
+    /// - Overall standing is weighted over 100% always (no renormalization).
+    /// - Missing/ungraded components contribute 0.
+    /// - Quizzes apply "Consideration Quiz replaces the lowest" per period (Prelim/Midterm/Finals).
+    /// </summary>
     private void RecomputeTotals()
     {
+        // totals for display (only graded/what-if items)
         decimal e = 0m;
         decimal p = 0m;
 
-        foreach (var r in rows)
-        {
-            p += r.MaxScore;
+        componentSummaries = new List<ComponentSummary>();
 
-            if (r.ActualScore.HasValue)
+        // overall weighted standing (0..100)
+        decimal weightedStandingTotal = 0m;
+
+        // group per component
+        var groups = rows.GroupBy(r => new
+        {
+            r.GradingComponentId,
+            r.ComponentType,
+            r.ComponentName,
+            r.ComponentWeightPercent,
+            r.ComponentOrder
+        });
+
+        foreach (var g in groups)
+        {
+            decimal? compPercent;
+
+            // Special handling for Quizzes: consideration replaces lowest per period
+            if (g.Key.ComponentType == ComponentType.Quizzes)
             {
-                e += Clamp(r.ActualScore.Value, 0, r.MaxScore);
+                var quizResult = ComputeQuizzesPercentWithReplacement(g.ToList(), whatIfEnabled);
+
+                compPercent = quizResult.Percent;
+
+                // display totals: only include items that have a score (actual/what-if) in the chosen effective set
+                foreach (var chosen in quizResult.ChosenRows)
+                {
+                    var sc = GetEffectiveScore(chosen, whatIfEnabled);
+                    if (!sc.HasValue) continue;
+
+                    e += Clamp(sc.Value, 0, chosen.MaxScore);
+                    p += chosen.MaxScore;
+                }
             }
-            else if (whatIfEnabled && r.WhatIfScore.HasValue)
+            else
             {
-                e += Clamp(r.WhatIfScore.Value, 0, r.MaxScore);
+                // Normal components:
+                // - Comp percent uses scored items only (so it can show progress),
+                //   BUT overall standing still treats missing components as 0 because we don't renormalize.
+                decimal compEarned = 0m;
+                decimal compPossible = 0m;
+
+                foreach (var r in g)
+                {
+                    var sc = GetEffectiveScore(r, whatIfEnabled);
+                    if (!sc.HasValue) continue;
+
+                    compEarned += Clamp(sc.Value, 0, r.MaxScore);
+                    compPossible += r.MaxScore;
+
+                    e += Clamp(sc.Value, 0, r.MaxScore);
+                    p += r.MaxScore;
+                }
+
+                compPercent = (compPossible <= 0m) ? (decimal?)null : (compEarned / compPossible) * 100m;
             }
+
+            // Contribution: missing/ungraded -> 0
+            var contribution = (compPercent.HasValue)
+                ? compPercent.Value * (g.Key.ComponentWeightPercent / 100m)
+                : 0m;
+
+            weightedStandingTotal += contribution;
+
+            componentSummaries.Add(new ComponentSummary
+            {
+                OrderNo = g.Key.ComponentOrder,
+                Name = g.Key.ComponentName,
+                WeightPercent = g.Key.ComponentWeightPercent,
+                CurrentPercent = compPercent,
+                Contribution = contribution
+            });
         }
 
         earned = e;
         possible = p;
-        totalPercent = (possible <= 0) ? 0 : (earned / possible) * 100m;
+
+        // ✅ Conservative standing: no renormalization
+        totalPercent = weightedStandingTotal;
 
         gradeEquivalent = ToGradeEquivalent(totalPercent);
+
         StateHasChanged();
     }
 
+    // -----------------------
+    // Quizzes: replacement rule
+    // -----------------------
+    private enum QuizPeriod { Prelim, Midterm, Finals, Unknown }
+    private enum QuizKind { Short, Long, Consideration, Other }
+
+    private static QuizPeriod GetQuizPeriod(string label)
+    {
+        if (label.StartsWith("Prelim", StringComparison.OrdinalIgnoreCase)) return QuizPeriod.Prelim;
+        if (label.StartsWith("Midterm", StringComparison.OrdinalIgnoreCase)) return QuizPeriod.Midterm;
+        if (label.StartsWith("Finals", StringComparison.OrdinalIgnoreCase)) return QuizPeriod.Finals;
+        return QuizPeriod.Unknown;
+    }
+
+    private static QuizKind GetQuizKind(string label)
+    {
+        if (label.Contains("Short Quiz", StringComparison.OrdinalIgnoreCase)) return QuizKind.Short;
+        if (label.Contains("Long Quiz", StringComparison.OrdinalIgnoreCase)) return QuizKind.Long;
+        if (label.Contains("Consideration Quiz", StringComparison.OrdinalIgnoreCase)) return QuizKind.Consideration;
+        return QuizKind.Other;
+    }
+
+    private static decimal? GetEffectiveScore(GradeRow r, bool whatIfEnabled)
+    {
+        if (r.ActualScore.HasValue) return r.ActualScore;
+        if (whatIfEnabled && r.WhatIfScore.HasValue) return r.WhatIfScore;
+        return null;
+    }
+
+    private sealed class QuizComputeResult
+    {
+        public decimal? Percent { get; set; }
+        public List<GradeRow> ChosenRows { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Computes quiz percent (0..100) with consideration replacement:
+    /// For each period, base is Short + Long. Consideration may replace the lower of those two.
+    /// Conservative handling:
+    /// - If only one of Short/Long has a score so far, we compute percent using only what is scored (progress view).
+    /// - If neither has a score and only consideration has a score, we show percent based on that one (progress view).
+    /// This percent affects contribution; ungraded quiz component still contributes 0 overall.
+    /// </summary>
+    private static QuizComputeResult ComputeQuizzesPercentWithReplacement(
+        List<GradeRow> quizRows,
+        bool whatIfEnabled)
+    {
+        decimal earned = 0m;
+        decimal possible = 0m;
+
+        var chosen = new List<GradeRow>();
+
+        foreach (var pg in quizRows.GroupBy(r => GetQuizPeriod(r.ItemLabel)))
+        {
+            if (pg.Key == QuizPeriod.Unknown) continue;
+
+            var shortRow = pg.FirstOrDefault(r => GetQuizKind(r.ItemLabel) == QuizKind.Short);
+            var longRow = pg.FirstOrDefault(r => GetQuizKind(r.ItemLabel) == QuizKind.Long);
+            var consRow = pg.FirstOrDefault(r => GetQuizKind(r.ItemLabel) == QuizKind.Consideration);
+
+            // gather scored base candidates
+            var baseList = new List<(GradeRow row, decimal pct)>();
+
+            if (shortRow is not null)
+            {
+                var s = GetEffectiveScore(shortRow, whatIfEnabled);
+                if (s.HasValue && shortRow.MaxScore > 0m)
+                    baseList.Add((shortRow, s.Value / shortRow.MaxScore));
+            }
+
+            if (longRow is not null)
+            {
+                var l = GetEffectiveScore(longRow, whatIfEnabled);
+                if (l.HasValue && longRow.MaxScore > 0m)
+                    baseList.Add((longRow, l.Value / longRow.MaxScore));
+            }
+
+            decimal? consPct = null;
+            if (consRow is not null)
+            {
+                var c = GetEffectiveScore(consRow, whatIfEnabled);
+                if (c.HasValue && consRow.MaxScore > 0m)
+                    consPct = c.Value / consRow.MaxScore;
+            }
+
+            // If no scores at all this period, skip it
+            if (baseList.Count == 0 && consPct is null) continue;
+
+            // If we have 2 base scores (short+long), allow consideration to replace the lower
+            if (baseList.Count >= 2 && consPct.HasValue)
+            {
+                var idxLow = baseList[0].pct <= baseList[1].pct ? 0 : 1;
+                if (consPct.Value > baseList[idxLow].pct)
+                {
+                    // replace the lower quiz's pct, keeping that quiz's MaxScore
+                    baseList[idxLow] = (baseList[idxLow].row, consPct.Value);
+                }
+            }
+            else if (baseList.Count == 1 && consPct.HasValue && consRow is not null)
+            {
+                // progress: let consideration act as an additional improvement signal
+                // (it won't create extra "3 quizzes"; it's only for progress view)
+                baseList.Add((consRow, consPct.Value));
+            }
+            else if (baseList.Count == 0 && consPct.HasValue && consRow is not null)
+            {
+                baseList.Add((consRow, consPct.Value));
+            }
+
+            // accumulate chosen rows (for display totals)
+            foreach (var (row, pct) in baseList)
+            {
+                chosen.Add(row);
+                earned += pct * row.MaxScore;
+                possible += row.MaxScore;
+            }
+        }
+
+        var percent = possible <= 0m ? (decimal?)null : (earned / possible) * 100m;
+
+        return new QuizComputeResult
+        {
+            Percent = percent,
+            ChosenRows = chosen
+        };
+    }
+
+    // -----------------------
+    // Utilities + UI helpers
+    // -----------------------
     private static decimal Clamp(decimal v, decimal min, decimal max)
         => (v < min) ? min : (v > max) ? max : v;
 
@@ -329,11 +590,28 @@ else
 
     private sealed class GradeRow
     {
+        public int GradingComponentId { get; set; }
+        public ComponentType ComponentType { get; set; }
+        public int ComponentOrder { get; set; }
+
         public string ComponentName { get; set; } = "";
+        public decimal ComponentWeightPercent { get; set; }
+
         public string ItemLabel { get; set; } = "";
         public decimal MaxScore { get; set; }
+
         public decimal? ActualScore { get; set; }
         public decimal? WhatIfScore { get; set; }
+
         public bool HasActualScore => ActualScore.HasValue;
+    }
+
+    private sealed class ComponentSummary
+    {
+        public int OrderNo { get; set; }
+        public string Name { get; set; } = "";
+        public decimal WeightPercent { get; set; }
+        public decimal? CurrentPercent { get; set; }  // null = no scores yet
+        public decimal Contribution { get; set; }     // weight * percent, or 0 if null
     }
 }
