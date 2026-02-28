@@ -1,6 +1,7 @@
 @page "/scorer/classoffering/{Id:int}/encode"
 @rendermode InteractiveServer
 
+@using System.Security.Claims
 @using GradeProgressMonitoring.Models
 @using GradeProgressMonitoring.Data
 @using GradeProgressMonitoring.Services
@@ -345,6 +346,11 @@ else
             openFlagMsg = "Updated.";
             openFlagCss = "text-success";
         }
+        catch (DbUpdateException ex)
+        {
+            openFlagMsg = ex.InnerException?.Message ?? ex.Message;
+            openFlagCss = "text-danger";
+        }
         catch (Exception ex)
         {
             openFlagMsg = ex.Message;
@@ -403,6 +409,10 @@ else
         saving = true;
         message = null;
 
+        // ✅ Capture encoder user id for auditing / FK safety
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var currentUserId = authState.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
+
         try
         {
             // Load ALL existing entries once (avoid N+1 queries)
@@ -410,9 +420,11 @@ else
                 .Where(s => s.ComponentItemId == selectedItem.ComponentItemId)
                 .ToListAsync();
 
+            // ✅ If duplicates exist in DB, keep the latest (prevents dictionary crash / unique issues)
             var byUserId = existing
                 .Where(x => !string.IsNullOrWhiteSpace(x.StudentUserId))
-                .ToDictionary(x => x.StudentUserId, x => x);
+                .GroupBy(x => x.StudentUserId)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.UpdatedAt).First());
 
             var changes = 0;
 
@@ -445,8 +457,9 @@ else
                     Db.ScoreEntries.Add(new ScoreEntry
                     {
                         ComponentItemId = selectedItem.ComponentItemId,
-                        StudentUserId = row.StudentUserId,
+                        StudentUserId = row.StudentUserId.Trim(),
                         Score = row.Score,
+                        EncodedByUserId = string.IsNullOrWhiteSpace(currentUserId) ? null : currentUserId, // ✅
                         EncodedAt = DateTime.Now,
                         UpdatedAt = DateTime.Now
                     });
@@ -457,6 +470,7 @@ else
                     if (entry.Score != row.Score)
                     {
                         entry.Score = row.Score;
+                        entry.EncodedByUserId = string.IsNullOrWhiteSpace(currentUserId) ? entry.EncodedByUserId : currentUserId; // ✅
                         entry.UpdatedAt = DateTime.Now;
                         changes++;
                     }
@@ -477,9 +491,15 @@ else
 
             await LoadExistingScoresAsync();
         }
+        catch (DbUpdateException ex)
+        {
+            var inner = ex.InnerException?.Message ?? "(no inner exception)";
+            message = $"Save failed: {inner}";
+            messageCss = "text-danger";
+        }
         catch (Exception ex)
         {
-            message = ex.Message;
+            message = ex.ToString(); // temporary: shows stack trace for debugging
             messageCss = "text-danger";
         }
         finally
